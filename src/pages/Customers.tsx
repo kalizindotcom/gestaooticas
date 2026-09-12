@@ -575,7 +575,55 @@ export default function Customers() {
       {viewMode === 'table' ? (
         <div className="animate-fade-in-up" style={{ animationDelay: '450ms' }}>
           <Card className="overflow-hidden border-border/60 hover-lift">
-            <div className="overflow-x-auto">
+            <div className="divide-y divide-border/50 md:hidden">
+              {paginatedCustomers.map((c, i) => {
+                const metrics = getCustomerMetrics(c);
+                const displayName = c.nickname || c.name;
+                const document = c.customerType === 'company' ? c.cnpj : c.cpf;
+                const documentLabel = c.customerType === 'company' ? 'CNPJ' : 'CPF';
+                const initials = String(displayName).split(/\s+/).filter(Boolean).slice(0, 2).map((part: string) => part[0]).join('').toUpperCase() || 'CL';
+                return (
+                  <div key={c.id} className="group flex min-w-0 items-center gap-3 p-3.5 transition-colors active:bg-primary/5" style={{ animationDelay: `${500 + i * 30}ms` }}>
+                    <button type="button" className="flex min-w-0 flex-1 items-center gap-3 text-left" onClick={() => setDetailsOpen(c.id)} aria-label={`Abrir detalhes de ${displayName}`}>
+                      <div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl border border-primary/20 bg-primary/10 text-sm font-black text-primary">{initials}</div>
+                      <div className="min-w-0 flex-1">
+                        <div className="flex min-w-0 items-center gap-2">
+                          <p className="min-w-0 flex-1 truncate text-sm font-bold text-foreground">{displayName}</p>
+                          <StatusBadge status={c.status} variant="dot" />
+                        </div>
+                        <p className="mt-0.5 truncate font-mono text-[10px] text-muted-foreground">{document ? `${documentLabel}: ${document}` : 'Documento não informado'}</p>
+                        <div className="mt-1.5 flex min-w-0 items-center gap-1.5 text-[11px] text-muted-foreground">
+                          <Store className="h-3 w-3 shrink-0 text-primary" />
+                          <span className="truncate">{getStoreName(c)}</span>
+                          <span className="shrink-0 text-border">•</span>
+                          <span className="truncate">{getStoreLocation(c)}</span>
+                        </div>
+                        <div className="mt-2 flex items-center gap-2 text-[10px] font-semibold text-muted-foreground">
+                          <span className="rounded-md bg-primary/8 px-1.5 py-1 text-primary">{metrics.sales.count} vendas</span>
+                          <span className="rounded-md bg-muted px-1.5 py-1">{metrics.serviceOrders} O.S.</span>
+                          <span className="ml-auto whitespace-nowrap font-bold text-foreground">R$ {metrics.sales.total.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</span>
+                        </div>
+                      </div>
+                    </button>
+                    <PermissionGate module="customers" action="edit">
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild onClick={(e) => e.stopPropagation()}>
+                          <Button variant="ghost" size="icon" aria-label={`Ações de ${displayName}`} className="h-9 w-9 shrink-0 rounded-lg text-muted-foreground hover:bg-primary/10 hover:text-primary">
+                            <MoreVertical className="h-4 w-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end" className="w-48 glass border-gradient">
+                          <DropdownMenuItem onClick={() => handleQuickAction("Nova Venda", c.id)} className="gap-2 cursor-pointer font-medium"><ShoppingBag className="h-4 w-4 text-primary" /> Nova Venda</DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => handleQuickAction("Nova O.S.", c.id)} className="gap-2 cursor-pointer font-medium"><Wrench className="h-4 w-4 text-primary" /> Abrir O.S.</DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => handleQuickAction("Enviar WhatsApp", c.id)} className="gap-2 cursor-pointer font-medium"><Phone className="h-4 w-4 text-emerald-500" /> WhatsApp</DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </PermissionGate>
+                  </div>
+                );
+              })}
+            </div>
+            <div className="hidden overflow-x-auto md:block">
               <Table>
               <TableHeader>
                 <TableRow className="bg-muted/30 hover:bg-muted/30 border-b border-border/60">

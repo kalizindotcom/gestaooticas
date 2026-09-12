@@ -674,45 +674,53 @@ export default function ServiceOrders() {
 
       {view === 'table' && (
           <Card className="overflow-hidden border-border/70 bg-card shadow-sm">
-          <CardContent className="overflow-x-auto p-0">
-            <Table className="min-w-[860px]">
-              <TableHeader className="bg-muted/30">
-                <TableRow className="hover:bg-transparent">
-                  <TableHead className="h-10 text-[10px] uppercase tracking-wider">O.S.</TableHead>
-                  <TableHead className="h-10 text-[10px] uppercase tracking-wider">Cliente</TableHead>
-                  <TableHead className="h-10 text-[10px] uppercase tracking-wider">Status</TableHead>
-                  <TableHead className="h-10 text-[10px] uppercase tracking-wider">Prioridade</TableHead>
-                  <TableHead className="h-10 text-[10px] uppercase tracking-wider">Prazo</TableHead>
-                  <TableHead className="h-10 text-right text-[10px] uppercase tracking-wider">Total</TableHead>
-                  <TableHead className="w-10"></TableHead>
-                </TableRow>
-              </TableHeader>
-              <TableBody>
-                {filteredOS.map((os) => (
-                  <TableRow
-                    key={os.id}
-                    onClick={() => setSelectedOS(os)}
-                    className={cn(
-                      "group cursor-pointer transition-all border-l-2 active:scale-[0.998]",
-                      selectedOS?.id === os.id
-                        ? "bg-primary/10 border-l-primary shadow-sm"
-                        : "border-l-transparent hover:bg-muted/50"
-                    )}
-                  >
-                    <TableCell className={cn("font-mono text-xs font-bold transition-colors", selectedOS?.id === os.id ? "text-primary" : "text-muted-foreground group-hover:text-primary")}>#{String(os.id).slice(0, 8).toUpperCase()}</TableCell>
-                    <TableCell className="min-w-[190px]">
-                      <div className="font-medium text-foreground">{os.customerName || 'Cliente não informado'}</div>
-                      <div className="text-xs text-muted-foreground">{os.customerPhone || 'Sem telefone'}</div>
-                    </TableCell>
-                    <TableCell><StatusBadge status={os.status} variant="dot" /></TableCell>
-                    <TableCell><PriorityBadge priority={os.priority} /></TableCell>
-                    <TableCell><div className="flex items-center gap-1.5 whitespace-nowrap text-xs"><Calendar className="h-3 w-3 text-muted-foreground" /> {os.deliveryDate || 'Sem prazo'}</div></TableCell>
-                    <TableCell className="text-right font-medium whitespace-nowrap">R$ {Number(os.total || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</TableCell>
-                    <TableCell onClick={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}><DropdownMenu><DropdownMenuTrigger asChild><Button variant="ghost" size="icon" aria-label={`Ações da O.S. ${os.id}`}><MoreHorizontal className="h-4 w-4" /></Button></DropdownMenuTrigger><DropdownMenuContent align="end"><DropdownMenuItem onSelect={() => setSelectedOS(os)}><Eye className="mr-2 h-4 w-4" /> Visualizar</DropdownMenuItem><DropdownMenuItem onSelect={() => handleEdit(os)}><Edit className="mr-2 h-4 w-4" /> Editar</DropdownMenuItem><DropdownMenuItem onSelect={() => { setSelectedOS(os); setConfirmDeleteOS(true); }} className="text-destructive focus:text-destructive"><Trash2 className="mr-2 h-4 w-4" /> Excluir</DropdownMenuItem></DropdownMenuContent></DropdownMenu></TableCell>
+          <CardContent className="p-0">
+            <div className="divide-y divide-border/50 md:hidden">
+              {filteredOS.map((os) => (
+                <div key={os.id} className={cn("flex min-w-0 items-center gap-3 p-4 transition-colors active:bg-primary/5", selectedOS?.id === os.id && "bg-primary/10") }>
+                  <button type="button" onClick={() => setSelectedOS(os)} className="min-w-0 flex-1 text-left" aria-label={`Visualizar O.S. ${os.id}`}>
+                    <div className="flex min-w-0 items-start justify-between gap-3">
+                      <div className="min-w-0"><p className="font-mono text-xs font-bold text-primary">#{String(os.id).slice(0, 8).toUpperCase()}</p><p className="mt-1 truncate text-sm font-bold text-foreground">{os.customerName || 'Cliente não informado'}</p><p className="mt-0.5 truncate text-[11px] text-muted-foreground">{os.customerPhone || 'Sem telefone'}</p></div>
+                      <StatusBadge status={os.status} variant="pill" />
+                    </div>
+                    <div className="mt-3 grid grid-cols-2 gap-2 border-t border-border/60 pt-3 text-xs min-[380px]:grid-cols-3">
+                      <div><p className="text-[10px] uppercase tracking-wide text-muted-foreground">Prioridade</p><PriorityBadge priority={os.priority} /></div>
+                      <div><p className="text-[10px] uppercase tracking-wide text-muted-foreground">Prazo</p><p className="truncate font-semibold text-foreground">{os.deliveryDate || 'Sem prazo'}</p></div>
+                      <div><p className="text-[10px] uppercase tracking-wide text-muted-foreground">Total</p><p className="font-bold text-primary">R$ {Number(os.total || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</p></div>
+                    </div>
+                  </button>
+                  <DropdownMenu><DropdownMenuTrigger asChild><Button variant="ghost" size="icon" aria-label={`Ações da O.S. ${os.id}`} className="h-9 w-9 shrink-0"><MoreHorizontal className="h-4 w-4" /></Button></DropdownMenuTrigger><DropdownMenuContent align="end"><DropdownMenuItem onSelect={() => setSelectedOS(os)}><Eye className="mr-2 h-4 w-4" /> Visualizar</DropdownMenuItem><DropdownMenuItem onSelect={() => handleEdit(os)}><Edit className="mr-2 h-4 w-4" /> Editar</DropdownMenuItem><DropdownMenuItem onSelect={() => { setSelectedOS(os); setConfirmDeleteOS(true); }} className="text-destructive focus:text-destructive"><Trash2 className="mr-2 h-4 w-4" /> Excluir</DropdownMenuItem></DropdownMenuContent></DropdownMenu>
+                </div>
+              ))}
+            </div>
+            <div className="hidden overflow-x-auto md:block">
+              <Table className="min-w-[860px]">
+                <TableHeader className="bg-muted/30">
+                  <TableRow className="hover:bg-transparent">
+                    <TableHead className="h-10 text-[10px] uppercase tracking-wider">O.S.</TableHead>
+                    <TableHead className="h-10 text-[10px] uppercase tracking-wider">Cliente</TableHead>
+                    <TableHead className="h-10 text-[10px] uppercase tracking-wider">Status</TableHead>
+                    <TableHead className="h-10 text-[10px] uppercase tracking-wider">Prioridade</TableHead>
+                    <TableHead className="h-10 text-[10px] uppercase tracking-wider">Prazo</TableHead>
+                    <TableHead className="h-10 text-right text-[10px] uppercase tracking-wider">Total</TableHead>
+                    <TableHead className="w-10"></TableHead>
                   </TableRow>
-                ))}
-              </TableBody>
-            </Table>
+                </TableHeader>
+                <TableBody>
+                  {filteredOS.map((os) => (
+                    <TableRow key={os.id} onClick={() => setSelectedOS(os)} className={cn("group cursor-pointer transition-all border-l-2 active:scale-[0.998]", selectedOS?.id === os.id ? "bg-primary/10 border-l-primary shadow-sm" : "border-l-transparent hover:bg-muted/50")}>
+                      <TableCell className={cn("font-mono text-xs font-bold transition-colors", selectedOS?.id === os.id ? "text-primary" : "text-muted-foreground group-hover:text-primary")}>#{String(os.id).slice(0, 8).toUpperCase()}</TableCell>
+                      <TableCell className="min-w-[190px]"><div className="font-medium text-foreground">{os.customerName || 'Cliente não informado'}</div><div className="text-xs text-muted-foreground">{os.customerPhone || 'Sem telefone'}</div></TableCell>
+                      <TableCell><StatusBadge status={os.status} variant="dot" /></TableCell>
+                      <TableCell><PriorityBadge priority={os.priority} /></TableCell>
+                      <TableCell><div className="flex items-center gap-1.5 whitespace-nowrap text-xs"><Calendar className="h-3 w-3 text-muted-foreground" /> {os.deliveryDate || 'Sem prazo'}</div></TableCell>
+                      <TableCell className="whitespace-nowrap text-right font-medium">R$ {Number(os.total || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</TableCell>
+                      <TableCell onClick={(event) => event.stopPropagation()} onPointerDown={(event) => event.stopPropagation()}><DropdownMenu><DropdownMenuTrigger asChild><Button variant="ghost" size="icon" aria-label={`Ações da O.S. ${os.id}`}><MoreHorizontal className="h-4 w-4" /></Button></DropdownMenuTrigger><DropdownMenuContent align="end"><DropdownMenuItem onSelect={() => setSelectedOS(os)}><Eye className="mr-2 h-4 w-4" /> Visualizar</DropdownMenuItem><DropdownMenuItem onSelect={() => handleEdit(os)}><Edit className="mr-2 h-4 w-4" /> Editar</DropdownMenuItem><DropdownMenuItem onSelect={() => { setSelectedOS(os); setConfirmDeleteOS(true); }} className="text-destructive focus:text-destructive"><Trash2 className="mr-2 h-4 w-4" /> Excluir</DropdownMenuItem></DropdownMenuContent></DropdownMenu></TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
           </CardContent>
         </Card>
       )}

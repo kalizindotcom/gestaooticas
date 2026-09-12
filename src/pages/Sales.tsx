@@ -644,7 +644,28 @@ export default function Sales() {
           {sortedSales.length === 0 ? (
             <EmptyState icon={sortedSales.length === 0 && sales.length === 0 ? ShoppingCart : Search} title={sales.length === 0 ? 'Nenhuma venda registrada' : 'Nenhuma venda encontrada'} description={sales.length === 0 ? 'Registre a primeira venda para começar.' : 'Ajuste os filtros ou limpe a busca para visualizar os registros.'} action={canCreate ? <Button onClick={openNewSale} className="gap-2"><Plus className="h-4 w-4" /> Nova venda</Button> : undefined} />
           ) : viewMode === 'table' ? (
-            <div className="overflow-x-auto">
+            <>
+            <div className="divide-y divide-border/50 md:hidden">
+              {sortedSales.map((sale: any) => (
+                <button key={sale.id} type="button" onClick={() => setSelectedSale(sale)} className="flex w-full min-w-0 flex-col gap-3 p-4 text-left transition-colors active:bg-primary/5">
+                  <div className="flex min-w-0 items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="font-mono text-xs font-bold text-primary">#{String(sale.id).slice(0, 8).toUpperCase()}</p>
+                      <p className="mt-1 truncate text-sm font-bold text-foreground">{sale.customerName || 'Cliente não informado'}</p>
+                      <p className="mt-0.5 flex items-center gap-1 text-[11px] text-muted-foreground"><Calendar className="h-3 w-3 shrink-0" /> {formatBusinessDate(sale.date)}</p>
+                    </div>
+                    <StatusBadge status={sale.status} />
+                  </div>
+                  <div className="grid grid-cols-2 gap-2 border-t border-border/60 pt-3 text-xs min-[380px]:grid-cols-4">
+                    <div className="min-w-0"><p className="text-[10px] uppercase tracking-wide text-muted-foreground">Loja</p><p className="truncate font-semibold text-foreground">{sale.storeName || '—'}</p></div>
+                    <div><p className="text-[10px] uppercase tracking-wide text-muted-foreground">Itens</p><p className="font-semibold text-foreground">{(sale.items || []).reduce((sum: number, item: any) => sum + Number(item.qty || 0), 0)} un</p></div>
+                    <div className="min-w-0"><p className="text-[10px] uppercase tracking-wide text-muted-foreground">Pagamento</p><p className="truncate font-semibold text-foreground">{PAYMENT_METHODS[sale.paymentMethod || sale.payment_method]?.short || sale.paymentMethod || sale.payment_method || '—'}</p></div>
+                    <div><p className="text-[10px] uppercase tracking-wide text-muted-foreground">Total</p><p className="font-bold text-primary">{currency(sale.total)}</p></div>
+                  </div>
+                </button>
+              ))}
+            </div>
+            <div className="hidden overflow-x-auto md:block">
               <Table>
                 <TableHeader><TableRow className="border-border/60 bg-muted/30 hover:bg-muted/30"><TableHead className="pl-5">Venda / data</TableHead><TableHead>Cliente</TableHead><TableHead>Loja</TableHead><TableHead>Itens</TableHead><TableHead>Pagamento</TableHead><TableHead className="text-right">Total</TableHead><TableHead className="pr-5">Status</TableHead></TableRow></TableHeader>
                 <TableBody>{sortedSales.map((sale: any) => <TableRow key={sale.id} onClick={() => setSelectedSale(sale)} className="cursor-pointer border-border/50 transition-colors hover:bg-primary/[0.04]">
@@ -658,6 +679,7 @@ export default function Sales() {
                 </TableRow>)}</TableBody>
               </Table>
             </div>
+            </>
           ) : (
             <div className="grid gap-3 p-4 md:grid-cols-2 xl:grid-cols-3">{sortedSales.map((sale: any) => <button key={sale.id} type="button" onClick={() => setSelectedSale(sale)} className="rounded-2xl border border-border/70 bg-card p-4 text-left shadow-sm transition-all hover:-translate-y-0.5 hover:border-primary/40 hover:shadow-md">
               <div className="flex items-start justify-between gap-3"><div><p className="font-mono text-xs font-bold text-primary">#{String(sale.id).slice(0, 8).toUpperCase()}</p><p className="mt-1 text-sm font-bold text-foreground">{sale.customerName || 'Cliente não informado'}</p></div><StatusBadge status={sale.status} /></div>
