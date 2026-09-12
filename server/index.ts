@@ -24,6 +24,28 @@ import {
   hashResetToken,
   ensureDefaultFinancialCategories,
 } from './db.js';
+import {
+  createBackup,
+  createGoogleOAuthUrl,
+  disconnectGoogleDrive,
+  downloadGoogleDriveBackup,
+  getBackupDirectory,
+  getBackupArchivePath,
+  getBackupJob,
+  getBackupSettings,
+  getGoogleDriveConfigStatus,
+  importBackupArchive,
+  inspectArchive,
+  listBackupEvents,
+  listBackupJobs,
+  listGoogleDriveBackups,
+  restoreBackup,
+  runBackupScheduler,
+  saveBackupSettings,
+  startBackupScheduler,
+  testGoogleDrive,
+  connectGoogleDrive,
+} from './backupService.js';
 import { resolveFiscalProvider } from './fiscalProvider.js';
 import { canTransitionFiscalStatus, isProductionEnvironment } from './fiscalDomain.js';
 
@@ -34,6 +56,16 @@ const port = Number(process.env.PORT || 3001);
 const authSecret = process.env.LOCAL_AUTH_SECRET || 'otica-nordestina-local-development-secret';
 const uploadsRoot = path.join(projectRoot, 'uploads');
 const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
+const backupUpload = multer({
+  storage: multer.diskStorage({
+    destination: (_request, _file, callback) => {
+      fs.mkdirSync(getBackupDirectory(), { recursive: true });
+      callback(null, getBackupDirectory());
+    },
+    filename: (_request, file, callback) => callback(null, `incoming-${Date.now()}-${newId()}-${path.basename(file.originalname)}`),
+  }),
+  limits: { fileSize: 1024 * 1024 * 1024 },
+});
 
 const uploadRootResolved = path.resolve(uploadsRoot);
 function isWithinUploads(candidate: string) {
@@ -653,6 +685,151 @@ app.post('/api/admin/backup', requireAuth, (request: AuthenticatedRequest, respo
     return response.status(500).json({ data: null, error: errorPayload(error) });
   }
 });
+
+function requireBackupMaster(request: AuthenticatedRequest, response: Response) {
+  if (!isMaster(request.profile)) {
+    response.status(403).json({ data: null, error: { message: 'Somente o administrador master pode gerenciar backups.', code: '403' } });
+    return false;
+  }
+  return true;
+}
+
+function backupRedirectUri(request: Request) {
+  return process.env.GOOGLE_DRIVE_REDIRECT_URI || `${request.protocol}://${request.get('host')}/api/admin/backups/drive/callback`;
+}
+
+app.get('/api/admin/backups/settings', requireAuth, (request: AuthenticatedRequest, response: Response) => {
+  if (!requireBackupMaster(request, response)) return;
+  return response.json({ data: { settings: getBackupSettings(), drive: getGoogleDriveConfigStatus(backupRedirectUri(request)) }, error: null });
+});
+
+app.put('/api/admin/backups/settings', requireAuth, (request: AuthenticatedRequest, response: Response) => {
+  if (!requireBackupMaster(request, response)) return;
+  try {
+    return response.json({ data: saveBackupSettings(request.body || {}), error: null });
+  } catch (error) {
+    return response.status(400).json({ data: null, error: errorPayload(error) });
+  }
+});
+
+app.get('/api/admin/backups/history', requireAuth, (request: AuthenticatedRequest, response: Response) => {
+  if (!requireBackupMaster(request, response)) return;
+  const result = listBackupJobs({ status: String(request.query.status || 'all'), limit: Number(request.query.limit || 50), offset: Number(request.query.offset || 0) });
+  response.setHeader('X-Total-Count', String(result.total));
+  return response.json({ data: result.rows, error: null });
+});
+
+app.get('/api/admin/backups/events', requireAuth, (request: AuthenticatedRequest, response: Response) => {
+  if (!requireBackupMaster(request, response)) return;
+  return response.json({ data: listBackupEvents(request.query.job_id ? String(request.query.job_id) : undefined, Number(request.query.limit || 200)), error: null });
+});
+
+app.post('/api/admin/backups/run', requireAuth, async (request: AuthenticatedRequest, response: Response) => {
+  if (!requireBackupMaster(request, response)) return;
+  try {
+    const job = await createBackup({ type: 'manual', label: String(request.body?.label || 'manual'), createdBy: request.userId, redirectUri: backupRedirectUri(request), forceDrive: Boolean(request.body?.send_to_drive) });
+    return response.status(201).json({ data: job, error: null });
+  } catch (error) {
+    return response.status(500).json({ data: null, error: errorPayload(error) });
+  }
+});
+
+app.get('/api/admin/backups/:id/download', requireAuth, (request: AuthenticatedRequest, response: Response) => {
+  if (!requireBackupMaster(request, response)) return;
+  const archivePath = getBackupArchivePath(String(request.params.id));
+  if (!archivePath) return response.status(404).json({ data: null, error: { message: 'Arquivo de backup não está disponível localmente.' } });
+  return response.download(archivePath, path.basename(archivePath));
+});
+
+app.post('/api/admin/backups/import', requireAuth, backupUpload.single('file'), async (request: AuthenticatedRequest, response: Response) => {
+  if (!requireBackupMaster(request, response)) return;
+  try {
+    const importedPath = request.file?.path;
+    if (!importedPath) return response.status(400).json({ data: null, error: { message: 'Selecione um arquivo .tar.gz de backup.' } });
+    const job = await importBackupArchive(importedPath, request.userId);
+    return response.status(201).json({ data: job, error: null });
+  } catch (error) {
+    if (request.file?.path) fs.rmSync(request.file.path, { force: true });
+    return response.status(400).json({ data: null, error: errorPayload(error) });
+  }
+});
+
+app.post('/api/admin/backups/inspect', requireAuth, backupUpload.single('file'), async (request: AuthenticatedRequest, response: Response) => {
+  if (!requireBackupMaster(request, response)) return;
+  try {
+    const archivePath = request.file?.path;
+    if (!archivePath) return response.status(400).json({ data: null, error: { message: 'Selecione um arquivo de backup.' } });
+    const inspected = await inspectArchive(archivePath);
+    return response.json({ data: inspected, error: null });
+  } catch (error) {
+    if (request.file?.path) fs.rmSync(request.file.path, { force: true });
+    return response.status(400).json({ data: null, error: errorPayload(error) });
+  }
+});
+
+app.post('/api/admin/backups/:id/restore', requireAuth, async (request: AuthenticatedRequest, response: Response) => {
+  if (!requireBackupMaster(request, response)) return;
+  try {
+    const result = await restoreBackup(String(request.params.id), String(request.body?.confirmation || ''));
+    return response.json({ data: result, error: null });
+  } catch (error) {
+    return response.status(400).json({ data: null, error: errorPayload(error) });
+  }
+});
+
+app.get('/api/admin/backups/drive/connect', requireAuth, (request: AuthenticatedRequest, response: Response) => {
+  if (!requireBackupMaster(request, response)) return;
+  try {
+    return response.json({ data: { url: createGoogleOAuthUrl(backupRedirectUri(request)), redirect_uri: backupRedirectUri(request) }, error: null });
+  } catch (error) {
+    return response.status(400).json({ data: null, error: errorPayload(error) });
+  }
+});
+
+app.get('/api/admin/backups/drive/callback', async (request: Request, response: Response) => {
+  try {
+    if (request.query.error) throw new Error(`Autorização Google recusada: ${String(request.query.error)}`);
+    await connectGoogleDrive(String(request.query.code || ''), String(request.query.state || ''), backupRedirectUri(request));
+    return response.type('html').send('<!doctype html><html><body><script>window.opener?.postMessage({type:"google-drive-connected"},"*");window.close();</script><p>Google Drive conectado. Você pode fechar esta janela.</p></body></html>');
+  } catch (error) {
+    return response.status(400).type('html').send(`<h1>Falha ao conectar Google Drive</h1><p>${String(error instanceof Error ? error.message : error).replaceAll('<', '&lt;')}</p>`);
+  }
+});
+
+app.post('/api/admin/backups/drive/test', requireAuth, async (request: AuthenticatedRequest, response: Response) => {
+  if (!requireBackupMaster(request, response)) return;
+  try {
+    return response.json({ data: await testGoogleDrive(backupRedirectUri(request)), error: null });
+  } catch (error) {
+    return response.status(400).json({ data: null, error: errorPayload(error) });
+  }
+});
+
+app.get('/api/admin/backups/drive/list', requireAuth, async (request: AuthenticatedRequest, response: Response) => {
+  if (!requireBackupMaster(request, response)) return;
+  try {
+    return response.json({ data: await listGoogleDriveBackups(backupRedirectUri(request)), error: null });
+  } catch (error) {
+    return response.status(400).json({ data: null, error: errorPayload(error) });
+  }
+});
+
+app.post('/api/admin/backups/drive/disconnect', requireAuth, (request: AuthenticatedRequest, response: Response) => {
+  if (!requireBackupMaster(request, response)) return;
+  return response.json({ data: disconnectGoogleDrive(), error: null });
+});
+
+app.post('/api/admin/backups/drive/import/:fileId', requireAuth, async (request: AuthenticatedRequest, response: Response) => {
+  if (!requireBackupMaster(request, response)) return;
+  try {
+    const archivePath = await downloadGoogleDriveBackup(String(request.params.fileId), backupRedirectUri(request));
+    const job = await importBackupArchive(archivePath, request.userId);
+    return response.status(201).json({ data: job, error: null });
+  } catch (error) {
+    return response.status(400).json({ data: null, error: errorPayload(error) });
+  }
+});
+
 
 app.get('/api/auth/permissions', requireAuth, (request: AuthenticatedRequest, response) => {
   const profile = request.profile || {};
@@ -2777,6 +2954,8 @@ app.use((error: unknown, _request: Request, response: Response, _next: NextFunct
 });
 
 initDatabase().then(() => {
+  startBackupScheduler();
+  runBackupScheduler().catch((error) => console.error('[backup-scheduler:first-run]', error));
   app.listen(port, '0.0.0.0', () => console.log(`Servidor local em http://localhost:${port}`));
 }).catch((error) => {
   console.error('Falha ao iniciar o banco local:', error);

@@ -264,6 +264,75 @@ CREATE TABLE IF NOT EXISTS fiscal_xml_imports (
   xml_url TEXT, raw_hash TEXT, imported_by TEXT, imported_by_name TEXT, created_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS backup_settings (
+  id TEXT PRIMARY KEY,
+  enabled INTEGER DEFAULT 1,
+  timezone TEXT DEFAULT 'America/Sao_Paulo',
+  daily_enabled INTEGER DEFAULT 1,
+  daily_count INTEGER DEFAULT 2,
+  weekly_enabled INTEGER DEFAULT 1,
+  weekly_count INTEGER DEFAULT 1,
+  monthly_enabled INTEGER DEFAULT 1,
+  monthly_count INTEGER DEFAULT 1,
+  schedule_hour INTEGER DEFAULT 2,
+  schedule_minute INTEGER DEFAULT 0,
+  include_database INTEGER DEFAULT 1,
+  include_uploads INTEGER DEFAULT 1,
+  upload_to_drive INTEGER DEFAULT 1,
+  drive_folder_id TEXT,
+  drive_folder_name TEXT DEFAULT 'Gestão Óticas - Backups',
+  google_account_email TEXT,
+  google_refresh_token TEXT,
+  google_token_expires_at TEXT,
+  retention_daily INTEGER DEFAULT 30,
+  retention_weekly INTEGER DEFAULT 12,
+  retention_monthly INTEGER DEFAULT 12,
+  max_local_backups INTEGER DEFAULT 20,
+  last_scheduler_tick TEXT,
+  last_drive_test_at TEXT,
+  last_drive_sync_at TEXT,
+  created_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS backup_jobs (
+  id TEXT PRIMARY KEY,
+  type TEXT NOT NULL,
+  status TEXT NOT NULL,
+  source TEXT DEFAULT 'local',
+  schedule_period TEXT,
+  schedule_slot TEXT UNIQUE,
+  label TEXT NOT NULL,
+  archive_name TEXT,
+  local_path TEXT,
+  size_bytes INTEGER DEFAULT 0,
+  sha256 TEXT,
+  drive_file_id TEXT,
+  drive_web_url TEXT,
+  included_database INTEGER DEFAULT 1,
+  included_uploads INTEGER DEFAULT 1,
+  manifest_json TEXT DEFAULT '{}',
+  error_message TEXT,
+  created_by TEXT,
+  started_at TEXT,
+  completed_at TEXT,
+  created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS backup_events (
+  id TEXT PRIMARY KEY,
+  job_id TEXT,
+  level TEXT DEFAULT 'info',
+  event_type TEXT NOT NULL,
+  message TEXT NOT NULL,
+  details_json TEXT DEFAULT '{}',
+  created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_backup_jobs_status_created ON backup_jobs(status, created_at);
+CREATE INDEX IF NOT EXISTS idx_backup_jobs_schedule ON backup_jobs(schedule_period, schedule_slot);
+CREATE INDEX IF NOT EXISTS idx_backup_events_job ON backup_events(job_id, created_at);
+
 CREATE INDEX IF NOT EXISTS idx_companies_cnpj ON companies(cnpj);
 CREATE INDEX IF NOT EXISTS idx_stores_company ON stores(company_id);
 CREATE INDEX IF NOT EXISTS idx_customers_company_store ON customers(company_id, store_id);
@@ -285,7 +354,7 @@ CREATE INDEX IF NOT EXISTS idx_fiscal_audits_document ON fiscal_audits(document_
 CREATE INDEX IF NOT EXISTS idx_fiscal_xml_imports_company_store ON fiscal_xml_imports(company_id, store_id, created_at);
 `;
 
-const jsonColumns = new Set(['companies', 'stores', 'tags', 'audit_log', 'recurrence_config', 'metadata', 'phones_json', 'emails_json', 'references_json']);
+const jsonColumns = new Set(['companies', 'stores', 'tags', 'audit_log', 'recurrence_config', 'metadata', 'phones_json', 'emails_json', 'references_json', 'manifest_json', 'details_json']);
 const booleanColumns = new Set(['is_system', 'is_active', 'is_reconciled', 'is_recurring']);
 
 export async function initDatabase() {
@@ -545,6 +614,14 @@ export function getDatabase() {
   return database;
 }
 
+export function getDatabasePath() {
+  return databasePath;
+}
+
+export function getBackupDirectory() {
+  return backupDir;
+}
+
 export function newId() {
   return randomUUID();
 }
@@ -680,8 +757,4 @@ function seedRoles() {
       [id, name, description, isSystem, now()],
     );
   }
-}
-
-export function getDatabasePath() {
-  return databasePath;
 }

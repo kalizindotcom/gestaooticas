@@ -542,6 +542,66 @@ const operations = {
   },
 };
 
+const backupAdmin = {
+  async getSettings() {
+    return request<{ settings: Record<string, any>; drive: Record<string, any> }>('/admin/backups/settings');
+  },
+  async saveSettings(settings: Record<string, unknown>) {
+    return request<Record<string, any>>('/admin/backups/settings', { method: 'PUT', body: JSON.stringify(settings) });
+  },
+  async listHistory(filters: { status?: string; limit?: number; offset?: number } = {}) {
+    const params = new URLSearchParams();
+    Object.entries(filters).forEach(([key, value]) => { if (value !== undefined) params.set(key, String(value)); });
+    return request<Record<string, any>[]>(`/admin/backups/history?${params.toString()}`);
+  },
+  async listEvents(jobId?: string) {
+    const params = jobId ? `?job_id=${encodeURIComponent(jobId)}` : '';
+    return request<Record<string, any>[]>(`/admin/backups/events${params}`);
+  },
+  async run(label = 'manual', sendToDrive = false) {
+    return request<Record<string, any>>('/admin/backups/run', { method: 'POST', body: JSON.stringify({ label, send_to_drive: sendToDrive }) });
+  },
+  async download(id: string) {
+    const session = getSessionFromStorage();
+    const headers = new Headers();
+    if (session?.access_token) headers.set('Authorization', `Bearer ${session.access_token}`);
+    const response = await fetch(`${API_BASE}/admin/backups/${encodeURIComponent(id)}/download`, { headers });
+    if (!response.ok) {
+      const payload = await response.json().catch(() => ({}));
+      throw new Error(payload.error?.message || 'Não foi possível baixar o backup.');
+    }
+    return response.blob();
+  },
+  async importFile(file: File) {
+    const form = new FormData();
+    form.set('file', file, file.name);
+    return request<Record<string, any>>('/admin/backups/import', { method: 'POST', body: form });
+  },
+  async inspectFile(file: File) {
+    const form = new FormData();
+    form.set('file', file, file.name);
+    return request<Record<string, any>>('/admin/backups/inspect', { method: 'POST', body: form });
+  },
+  async restore(id: string, confirmation: string) {
+    return request<Record<string, any>>(`/admin/backups/${encodeURIComponent(id)}/restore`, { method: 'POST', body: JSON.stringify({ confirmation }) });
+  },
+  async connectDrive() {
+    return request<{ url: string; redirect_uri: string }>('/admin/backups/drive/connect');
+  },
+  async testDrive() {
+    return request<Record<string, any>>('/admin/backups/drive/test', { method: 'POST', body: JSON.stringify({}) });
+  },
+  async listDrive() {
+    return request<Record<string, any>[]>('/admin/backups/drive/list');
+  },
+  async disconnectDrive() {
+    return request<Record<string, any>>('/admin/backups/drive/disconnect', { method: 'POST', body: JSON.stringify({}) });
+  },
+  async importDrive(fileId: string) {
+    return request<Record<string, any>>(`/admin/backups/drive/import/${encodeURIComponent(fileId)}`, { method: 'POST', body: JSON.stringify({}) });
+  },
+};
+
 export const localApi = {
   from: <T = any>(table: string) => new LocalQuery<T>(table),
   auth,
@@ -549,6 +609,7 @@ export const localApi = {
   functions,
   fiscal,
   operations,
+  backupAdmin,
 };
 
 export { API_BASE, getSessionFromStorage, saveSession };
