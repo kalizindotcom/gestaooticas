@@ -39,7 +39,7 @@ export default function Customers() {
   const [detailsOpen, setDetailsOpen] = useState<string | null>(null);
   const [initialTab, setInitialTab] = useState('overview');
   const [autoAction, setAutoAction] = useState<string | undefined>(undefined);
-  const [viewMode, setViewMode] = useState<'table' | 'cards'>('table');
+  const [viewMode, setViewMode] = useState<'table' | 'cards'>(() => typeof window !== 'undefined' && window.matchMedia('(max-width: 639px)').matches ? 'cards' : 'table');
   const [statusFilter, setStatusFilter] = useState<string[]>([]);
   const [tagFilter, setTagFilter] = useState<string[]>([]);
   const [storeFilter, setStoreFilter] = useState<string[]>([]);
@@ -424,8 +424,8 @@ export default function Customers() {
         </div>
       </div>
 
-      <div className="animate-fade-in-up flex flex-wrap items-center gap-3" style={{ animationDelay: '350ms' }}>
-        <div className="relative flex-1 min-w-[280px]">
+      <div className="animate-fade-in-up grid grid-cols-1 gap-3 sm:flex sm:flex-wrap sm:items-center" style={{ animationDelay: '350ms' }}>
+        <div className="relative min-w-0 w-full flex-1 sm:min-w-[280px]">
           <Search className="absolute left-3.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
             placeholder="Buscar por nome, apelido, CPF/CNPJ, telefone ou loja..."
@@ -440,7 +440,7 @@ export default function Customers() {
             <Button
               variant="outline"
               className={cn(
-                "h-11 gap-2 rounded-xl border-border/60 bg-background/40 hover-lift",
+                "h-11 w-full gap-2 rounded-xl border-border/60 bg-background/40 hover-lift sm:w-auto",
                 (statusFilter.length > 0 || tagFilter.length > 0 || storeFilter.length > 0) && "border-primary/40 bg-primary/5"
               )}
             >
@@ -453,7 +453,7 @@ export default function Customers() {
               )}
             </Button>
           </PopoverTrigger>
-          <PopoverContent className="max-h-[min(70vh,540px)] w-[320px] overflow-y-auto rounded-xl border-gradient p-0 shadow-2xl glass" align="start" sideOffset={8}>
+          <PopoverContent className="max-h-[min(70vh,540px)] w-[calc(100vw-1rem)] max-w-[320px] overflow-y-auto rounded-xl border-gradient p-0 shadow-2xl glass" align="start" sideOffset={8}>
             <div className="p-5 space-y-6 rounded-xl">
               <div className="flex items-center justify-between">
                 <div>
@@ -558,10 +558,10 @@ export default function Customers() {
           </PopoverContent>
         </Popover>
 
-        <span className="mr-auto text-xs font-semibold text-muted-foreground">Mostrando <strong className="text-foreground">{pageStart}–{pageEnd}</strong> de {filtered.length} clientes</span>
+        <span className="w-full text-xs font-semibold text-muted-foreground sm:mr-auto sm:w-auto">Mostrando <strong className="text-foreground">{pageStart}–{pageEnd}</strong> de {filtered.length} clientes</span>
 
-        <Tabs value={viewMode} onValueChange={v => setViewMode(v as any)} className="ml-auto">
-          <TabsList className="h-11 p-1 bg-muted/40 border border-border/60 rounded-xl">
+        <Tabs value={viewMode} onValueChange={v => setViewMode(v as any)} className="w-full sm:ml-auto sm:w-auto">
+          <TabsList className="grid h-11 w-full grid-cols-2 p-1 bg-muted/40 border border-border/60 rounded-xl sm:flex sm:w-auto">
             <TabsTrigger value="table" className="h-9 px-4 rounded-lg data-[state=active]:bg-card data-[state=active]:shadow-md">
               <List className="h-4 w-4 mr-2" /> Tabela
             </TabsTrigger>
@@ -686,6 +686,17 @@ export default function Customers() {
                       ))}
                     </div>
                   )}
+                  <div className="mt-4 grid grid-cols-3 gap-2 border-t border-border/50 pt-3" onClick={(event) => event.stopPropagation()}>
+                    <Button type="button" variant="outline" className="h-10 gap-1 px-2 text-[10px]" onClick={() => handleQuickAction('Enviar WhatsApp', c.id)} disabled={!c.phone && !c.whatsapp} aria-label="Enviar WhatsApp">
+                      <Phone className="h-3.5 w-3.5 text-emerald-600" /><span className="hidden min-[380px]:inline">WhatsApp</span>
+                    </Button>
+                    <Button type="button" variant="outline" className="h-10 gap-1 px-2 text-[10px]" onClick={() => handleQuickAction('Nova Venda', c.id)} aria-label="Nova venda">
+                      <ShoppingBag className="h-3.5 w-3.5 text-primary" /><span className="hidden min-[380px]:inline">Venda</span>
+                    </Button>
+                    <Button type="button" variant="outline" className="h-10 gap-1 px-2 text-[10px]" onClick={() => handleQuickAction('Nova O.S.', c.id)} aria-label="Abrir ordem de serviço">
+                      <Wrench className="h-3.5 w-3.5 text-primary" /><span className="hidden min-[380px]:inline">O.S.</span>
+                    </Button>
+                  </div>
                 </CardContent>
               </Card>
             </div>
@@ -697,11 +708,11 @@ export default function Customers() {
         <div className="flex flex-col gap-3 rounded-2xl border border-border/60 bg-card/70 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
           <p className="text-xs font-semibold text-muted-foreground">Página <strong className="text-foreground">{currentPage}</strong> de <strong className="text-foreground">{totalPages}</strong> · {filtered.length} clientes encontrados</p>
           <div className="flex items-center gap-2">
-            <Button type="button" variant="outline" size="icon" className="h-9 w-9 rounded-lg" disabled={currentPage === 1} onClick={() => setCurrentPage(page => Math.max(1, page - 1))} aria-label="Página anterior">
+            <Button type="button" variant="outline" size="icon" className="h-11 w-11 rounded-lg" disabled={currentPage === 1} onClick={() => setCurrentPage(page => Math.max(1, page - 1))} aria-label="Página anterior">
               <ChevronLeft className="h-4 w-4" />
             </Button>
             <span className="min-w-[92px] text-center text-xs font-bold text-foreground">{pageStart}–{pageEnd}</span>
-            <Button type="button" variant="outline" size="icon" className="h-9 w-9 rounded-lg" disabled={currentPage === totalPages} onClick={() => setCurrentPage(page => Math.min(totalPages, page + 1))} aria-label="Próxima página">
+            <Button type="button" variant="outline" size="icon" className="h-11 w-11 rounded-lg" disabled={currentPage === totalPages} onClick={() => setCurrentPage(page => Math.min(totalPages, page + 1))} aria-label="Próxima página">
               <ChevronRight className="h-4 w-4" />
             </Button>
           </div>

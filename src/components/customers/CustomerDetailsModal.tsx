@@ -28,6 +28,7 @@ import { AttachmentsTab } from './AttachmentsTab';
 import { FinancialStatusModal } from './FinancialStatusModal';
 import { AppointmentsTab } from './AppointmentsTab';
 import { HistoryTab } from './HistoryTab';
+import { RevenueTab } from './RevenueTab';
 
 const HIDDEN_IMPORT_TAGS = new Set(['importado-sistema-anterior', 'origem-otica-nordestina-ltda', 'origem-sertao-otica-bdc']);
 const visibleCustomerTags = (tags: string[] = []) => tags.filter(tag => !HIDDEN_IMPORT_TAGS.has(tag));
@@ -257,7 +258,7 @@ export function CustomerDetailsModal({ customer, open, onOpenChange, initialTab 
                                   <User className="h-3.5 w-3.5" /> Informações Pessoais
                               </h4>
                               <div className="bg-card rounded-xl p-4 border border-border/70 shadow-sm space-y-4">
-                                  <div className="grid grid-cols-2 gap-4">
+                                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                                       <div>
                                           <p className="text-[10px] font-bold uppercase text-muted-foreground/70 tracking-wider mb-1">{customer.customerType === 'company' ? 'CNPJ' : 'CPF'}</p>
                                           <p className="text-sm font-semibold text-foreground">{(customer.customerType === 'company' ? customer.cnpj : customer.cpf) || 'Não informado'}</p>
@@ -297,7 +298,7 @@ export function CustomerDetailsModal({ customer, open, onOpenChange, initialTab 
                                   <UserPlus className="h-3.5 w-3.5" /> Perfil e relacionamento
                               </h4>
                               <div className="bg-card rounded-xl p-4 border border-border/70 shadow-sm">
-                                  <div className="grid grid-cols-2 gap-4">
+                                  <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
                                       <div><p className="text-[10px] font-bold uppercase text-muted-foreground/70 tracking-wider mb-1">Tipo de cliente</p><p className="text-sm font-semibold text-foreground">{customer.customerType === 'company' ? 'Pessoa Jurídica' : 'Pessoa Física'}</p></div>
                                       <div><p className="text-[10px] font-bold uppercase text-muted-foreground/70 tracking-wider mb-1">Origem</p><p className="text-sm font-semibold text-foreground capitalize">{customer.origin || 'Não informado'}</p></div>
                                       <div><p className="text-[10px] font-bold uppercase text-muted-foreground/70 tracking-wider mb-1">Profissão</p><p className="text-sm font-semibold text-foreground">{customer.profession || 'Não informado'}</p></div>
@@ -348,7 +349,7 @@ export function CustomerDetailsModal({ customer, open, onOpenChange, initialTab 
                                               <div className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-primary/10 text-primary"><Phone className="h-4 w-4" /></div>
                                               <div className="min-w-0"><p className="text-[9px] font-bold uppercase tracking-wider text-muted-foreground">Telefone</p><p className="truncate text-sm font-semibold text-foreground">{customer.phone || 'Não informado'}</p></div>
                                           </div>
-                                          <Button variant="outline" size="sm" aria-label="Ligar para o cliente" className="h-7 shrink-0 rounded-md px-2.5 text-[10px] font-bold text-primary hover:bg-primary/5" onClick={() => customer.phone && window.open(`tel:${customer.phone.replace(/\D/g, '')}`, '_self')} disabled={!customer.phone}>Ligar</Button>
+                                          <Button variant="outline" size="sm" aria-label="Ligar para o cliente" className="h-10 shrink-0 rounded-md px-2.5 text-[10px] font-bold text-primary hover:bg-primary/5" onClick={() => customer.phone && window.open(`tel:${customer.phone.replace(/\D/g, '')}`, '_self')} disabled={!customer.phone}>Ligar</Button>
                                       </div>
                                       <div className="flex items-center justify-between gap-3 p-3.5 transition-colors hover:bg-muted/40">
                                           <div className="flex min-w-0 items-center gap-3">
@@ -362,7 +363,7 @@ export function CustomerDetailsModal({ customer, open, onOpenChange, initialTab 
                                               <div className="grid h-8 w-8 shrink-0 place-items-center rounded-lg bg-muted/60 text-muted-foreground"><Mail className="h-4 w-4" /></div>
                                               <div className="min-w-0"><p className="text-[9px] font-bold uppercase tracking-wider text-muted-foreground">E-mail</p><p className="truncate text-sm font-semibold text-foreground">{customer.email || 'Não informado'}</p></div>
                                           </div>
-                                          <Button variant="outline" size="sm" aria-label="Enviar e-mail para o cliente" className="h-7 shrink-0 rounded-md px-2.5 text-[10px] font-bold text-muted-foreground hover:bg-muted" onClick={() => customer.email && window.open(`mailto:${customer.email}`, '_self')} disabled={!customer.email}>Enviar</Button>
+                                          <Button variant="outline" size="sm" aria-label="Enviar e-mail para o cliente" className="h-10 shrink-0 rounded-md px-2.5 text-[10px] font-bold text-muted-foreground hover:bg-muted" onClick={() => customer.email && window.open(`mailto:${customer.email}`, '_self')} disabled={!customer.email}>Enviar</Button>
                                       </div>
                                   </div>
                               </div>
@@ -390,7 +391,7 @@ export function CustomerDetailsModal({ customer, open, onOpenChange, initialTab 
                                   </div>
                                   <Badge variant="outline" className={stats.overdueAmount > 0 ? "h-6 rounded-md border-red-500/25 bg-red-500/5 px-2 text-[9px] font-black text-red-600" : "h-6 rounded-md border-emerald-500/25 bg-emerald-500/5 px-2 text-[9px] font-black text-emerald-600"}>{stats.overdueAmount > 0 ? "VENCIDO" : "EM DIA"}</Badge>
                               </div>
-                              <div className="grid grid-cols-2 divide-x divide-y divide-border/60">
+                              <div className="grid grid-cols-1 divide-y divide-border/60 min-[400px]:grid-cols-2 min-[400px]:divide-x">
                                   <div className="p-3.5 sm:p-4">
                                       <p className="text-[9px] font-bold uppercase tracking-wider text-muted-foreground">Crédito disponível</p>
                                       <p className="mt-1 text-base font-black tabular-nums text-foreground">{formatMoney(stats.creditAvailable)}</p>
@@ -432,7 +433,7 @@ export function CustomerDetailsModal({ customer, open, onOpenChange, initialTab 
 
 
               <TabsContent value="revenue" className="m-0 animate-in fade-in slide-in-from-bottom-2 duration-300">
-                  <PrescriptionsTab customer={customer} />
+                  <RevenueTab customer={customer} />
               </TabsContent>
 
               <TabsContent value="credit" className="m-0 animate-in fade-in slide-in-from-bottom-2 duration-300">

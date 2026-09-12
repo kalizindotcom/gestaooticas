@@ -109,8 +109,8 @@ export function SalesTab({ customer, autoOpenNew }: SalesTabProps) {
 
   return (
     <div className="space-y-4">
-      <div className="flex justify-between items-center mb-4">
-        <div className="flex gap-2 flex-1 max-w-md">
+      <div className="mb-4 flex flex-col items-stretch gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="flex min-w-0 flex-col gap-2 sm:flex-1 sm:flex-row sm:gap-2 sm:max-w-md">
           <div className="relative flex-1">
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <Input placeholder="Buscar venda..." value={search} onChange={e => setSearch(e.target.value)} className="pl-10 h-10" />
@@ -124,7 +124,17 @@ export function SalesTab({ customer, autoOpenNew }: SalesTabProps) {
         </PermissionGate>
       </div>
 
-      <div className="bg-card border border-border/70 rounded-xl overflow-hidden shadow-sm">
+      <div className="space-y-2 sm:hidden">
+        {filteredSales.map((sale: any) => (
+          <button key={sale.id} type="button" onClick={() => setSelectedSale(sale)} className="w-full rounded-xl border border-border/70 bg-card p-4 text-left shadow-sm active:bg-muted/50">
+            <div className="flex items-start justify-between gap-3"><div><p className="font-mono text-xs font-bold text-primary">#{String(sale.id).slice(0, 8).toUpperCase()}</p><p className="mt-1 font-semibold text-foreground">{formatDateTime(sale.date)}</p></div><StatusBadge status={sale.status} /></div>
+            <div className="mt-3 grid grid-cols-2 gap-3 border-t border-border/60 pt-3 text-xs"><div><p className="text-muted-foreground">Loja</p><p className="font-semibold break-words">{sale.storeName || '-'}</p></div><div><p className="text-muted-foreground">Vendedor</p><p className="font-semibold break-words">{sale.sellerName || '-'}</p></div><div><p className="text-muted-foreground">Total</p><p className="font-bold text-primary">{formatMoney(sale.total)}</p></div><div className="text-right"><span className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-border/70"><Eye className="h-4 w-4" /></span></div></div>
+          </button>
+        ))}
+        {isLoading && [1, 2, 3].map(row => <div key={`sale-mobile-skeleton-${row}`} className="h-28 animate-pulse rounded-xl bg-muted" />)}
+        {!isLoading && filteredSales.length === 0 && <div className="rounded-xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground">Nenhuma venda encontrada.</div>}
+      </div>
+      <div className="hidden overflow-x-auto rounded-xl border border-border/70 bg-card shadow-sm sm:block">
         <Table>
           <TableHeader>
             <TableRow className="bg-muted/40">
@@ -146,7 +156,7 @@ export function SalesTab({ customer, autoOpenNew }: SalesTabProps) {
                 <TableCell className="text-sm">{sale.sellerName}</TableCell>
                 <TableCell className="text-right font-bold text-foreground">{formatMoney(sale.total)}</TableCell>
                 <TableCell><StatusBadge status={sale.status} /></TableCell>
-                <TableCell><Button variant="ghost" size="icon" className="opacity-0 group-hover:opacity-100 transition-opacity"><Eye className="h-4 w-4 text-muted-foreground" /></Button></TableCell>
+                <TableCell><Button variant="ghost" size="icon" aria-label="Ver detalhes da venda" className="h-10 w-10 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity"><Eye className="h-4 w-4 text-muted-foreground" /></Button></TableCell>
               </TableRow>
             ))}
             {isLoading && [1, 2, 3].map(row => <TableRow key={`sale-skeleton-${row}`}><TableCell colSpan={7} className="h-12"><div className="h-4 w-full animate-pulse rounded bg-muted" /></TableCell></TableRow>)}
@@ -224,14 +234,14 @@ export function SalesTab({ customer, autoOpenNew }: SalesTabProps) {
               {saleItems.length > 0 ? (
                 <div className="space-y-3">
                   {saleItems.map(item => (
-                    <div key={item.id} className="grid grid-cols-[1fr_100px_120px_40px] items-center gap-4 p-3 rounded-xl border bg-muted/5">
+                    <div key={item.id} className="grid grid-cols-1 gap-3 rounded-xl border bg-muted/5 p-3 sm:grid-cols-[minmax(0,1fr)_100px_120px_44px] sm:items-center">
                       <div>
                         <span className="text-sm font-semibold">{item.name}</span>
                         <span className="block text-xs text-muted-foreground">SKU: {item.sku || '-'} | Estoque: {item.stock}</span>
                       </div>
-                      <Input type="number" min={1} max={item.stock} value={item.quantity} onChange={e => updateItemQuantity(item.id, Number(e.target.value))} className="h-9" />
+                      <Input type="number" min={1} max={item.stock} value={item.quantity} onChange={e => updateItemQuantity(item.id, Number(e.target.value))} className="h-11 sm:h-9" />
                       <div className="text-right text-sm font-bold">{formatMoney(item.price * item.quantity)}</div>
-                      <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive" onClick={() => setSaleItems(prev => prev.filter(current => current.id !== item.id))}><Trash2 className="h-4 w-4" /></Button>
+                      <Button variant="ghost" size="icon" className="h-11 w-11 justify-self-end text-destructive sm:h-10 sm:w-10" onClick={() => setSaleItems(prev => prev.filter(current => current.id !== item.id))}><Trash2 className="h-4 w-4" /></Button>
                     </div>
                   ))}
                 </div>
@@ -245,14 +255,14 @@ export function SalesTab({ customer, autoOpenNew }: SalesTabProps) {
               <Textarea value={form.notes} onChange={e => setForm({ ...form, notes: e.target.value })} className="min-h-[90px] rounded-xl resize-none" placeholder="Detalhes adicionais sobre a venda..." />
             </div>
           </div>
-          <DialogFooter className="sticky bottom-0 flex items-center justify-between gap-4 border-t border-border/60 bg-card/95 p-5 backdrop-blur">
+          <DialogFooter className="sticky bottom-0 flex flex-col gap-4 border-t border-border/60 bg-card/95 p-4 backdrop-blur sm:flex-row sm:items-center sm:justify-between sm:p-5">
             <div>
               <span className="text-[11px] font-bold uppercase text-muted-foreground/80">Total Geral</span>
               <span className="block text-xl font-bold text-primary">{formatMoney(total)}</span>
             </div>
-            <div className="flex gap-3">
-              <Button variant="outline" onClick={() => { setNewSaleOpen(false); setSaleItems([]); }} className="h-11 px-8 rounded-xl">Cancelar</Button>
-              <Button onClick={handleSubmit} disabled={saleItems.length === 0 || createSale.isPending} className="h-11 px-8 rounded-xl bg-primary text-primary-foreground font-bold">
+            <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:w-auto sm:gap-3">
+              <Button variant="outline" onClick={() => { setNewSaleOpen(false); setSaleItems([]); }} className="h-11 w-full rounded-xl px-3 sm:px-8">Cancelar</Button>
+              <Button onClick={handleSubmit} disabled={saleItems.length === 0 || createSale.isPending} className="h-11 w-full rounded-xl bg-primary text-primary-foreground font-bold">
                 {createSale.isPending ? 'Salvando...' : 'Concluir Venda'}
               </Button>
             </div>

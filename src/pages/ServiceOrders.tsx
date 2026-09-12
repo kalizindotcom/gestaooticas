@@ -37,7 +37,7 @@ export default function ServiceOrders() {
   const { data: laboratories = [] } = useLaboratories();
   const { selectedStoreIds, selectedCompanyId, stores, companies } = useGlobalFilter();
 
-  const [view, setView] = useState<'table' | 'cards' | 'kanban'>('table');
+  const [view, setView] = useState<'table' | 'cards' | 'kanban'>(() => typeof window !== 'undefined' && window.matchMedia('(max-width: 639px)').matches ? 'cards' : 'table');
   const [selectedOS, setSelectedOS] = useState<any>(null);
   const [openNew, setOpenNew] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
@@ -155,7 +155,7 @@ export default function ServiceOrders() {
       setIsSaving(false);
     }
   };
-  
+
   const handleEdit = (order = selectedOS) => {
     if (!order) return;
     setFormData({
@@ -202,7 +202,7 @@ export default function ServiceOrders() {
     setOpenNew(true);
     setSelectedOS(null);
   };
-  
+
   const handlePrepareFiscal = async (order = selectedOS) => {
     if (!order) return;
     setIsPreparingFiscal(true);
@@ -483,15 +483,15 @@ export default function ServiceOrders() {
                 Nova Ordem de Serviço
               </DialogTitle>
             </DialogHeader>
-            <div className="custom-scrollbar min-h-0 flex-1 overflow-y-auto p-4 sm:p-5">
+            <div className="custom-scrollbar min-h-0 flex-1 overflow-y-auto p-3 sm:p-5">
               <ServiceOrderForm form={formData} onChange={updateForm} stores={stores} customers={customers} employees={employees} laboratories={laboratories} selectedCompanyId={selectedCompanyId} selectedStoreIds={selectedStoreIds} editing={isEditing} />
             </div>
-            <div className="sticky bottom-0 z-10 flex shrink-0 justify-end gap-2 border-t border-border/70 bg-card/95 p-3.5 backdrop-blur sm:p-4">
+            <div className="sticky bottom-0 z-10 flex shrink-0 flex-col gap-2 border-t border-border/70 bg-card/95 p-3.5 backdrop-blur sm:flex-row sm:justify-end sm:p-4">
               <Button variant="outline" onClick={() => setOpenNew(false)} className="h-9">
                 <X className="mr-2 h-4 w-4" /> Cancelar
               </Button>
               <Button
-                className="h-9 gap-2 px-5 font-bold shadow-md shadow-primary/20"
+                className="h-11 w-full gap-2 px-5 font-bold shadow-md shadow-primary/20 sm:h-9 sm:w-auto"
                 onClick={handleSave}
                 disabled={isSaving}
               >
@@ -576,26 +576,26 @@ export default function ServiceOrders() {
         <div>
           <div className="flex items-center gap-3"><span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-primary/10 text-primary"><FileText className="h-5 w-5" /></span><div><h1 className="text-xl font-bold tracking-tight sm:text-2xl">Ordens de Serviço</h1><p className="text-xs text-muted-foreground sm:text-sm">Acompanhe produção, laboratório, prazos e entrega em um só lugar.</p></div></div>
         </div>
-        <div className="flex items-center gap-2 w-full md:w-auto">
-          <div className="relative min-w-0 flex-1 md:w-72">
+        <div className="flex w-full flex-col items-stretch gap-2 sm:flex-row sm:items-center md:w-auto">
+          <div className="relative min-w-0 w-full flex-1 sm:min-w-[220px] md:w-72">
             <Search className="absolute left-2.5 top-2.5 h-4 w-4 text-muted-foreground" />
-            <Input 
-              placeholder="Buscar O.S., cliente ou telefone..." 
-              className="h-9 border-border/70 bg-background/80 pl-9 text-sm focus-visible:ring-primary/20" 
+            <Input
+              placeholder="Buscar O.S., cliente ou telefone..."
+              className="h-11 border-border/70 bg-background/80 pl-9 text-sm focus-visible:ring-primary/20 sm:h-9"
               value={searchTerm}
               onChange={(e) => setSearchTerm(e.target.value)}
             />
           </div>
           <Popover>
             <PopoverTrigger asChild>
-              <Button variant="outline" className={cn("h-9 gap-2 border-border/70 px-3", (statusFilter !== 'all' || priorityFilter !== 'all') && "border-primary/40 bg-primary/5 text-primary")}>
+              <Button variant="outline" className={cn("h-11 w-full gap-2 border-border/70 px-3 sm:h-9 sm:w-auto", (statusFilter !== 'all' || priorityFilter !== 'all') && "border-primary/40 bg-primary/5 text-primary")}>
                 <Filter className="h-4 w-4" /> Filtros
                 {(statusFilter !== 'all' || priorityFilter !== 'all') && (
                   <span className="flex h-2 w-2 rounded-full bg-primary" />
                 )}
               </Button>
             </PopoverTrigger>
-            <PopoverContent className="w-80 p-4" align="end">
+            <PopoverContent className="max-h-[min(75vh,520px)] w-[calc(100vw-1rem)] max-w-[320px] overflow-y-auto p-4" align="end">
               <div className="space-y-4">
                 <div className="space-y-2">
                   <h4 className="font-medium leading-none">Filtros Avançados</h4>
@@ -630,10 +630,10 @@ export default function ServiceOrders() {
                     </Select>
                   </div>
                 </div>
-                <Button 
-                  variant="ghost" 
-                  size="sm" 
-                  className="w-full text-xs h-8" 
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  className="w-full text-xs h-8"
                   onClick={() => { setStatusFilter('all'); setPriorityFilter('all'); }}
                 >
                   Limpar Filtros
@@ -641,7 +641,7 @@ export default function ServiceOrders() {
               </div>
             </PopoverContent>
           </Popover>
-          <Button className="h-9 gap-2 px-4 font-semibold shadow-md shadow-primary/20" onClick={() => { resetForm(); setIsEditing(false); setEditingOrderId(undefined); setOpenNew(true); }}>
+          <Button className="h-11 w-full gap-2 px-4 font-semibold shadow-md shadow-primary/20 sm:h-9 sm:w-auto" onClick={() => { resetForm(); setIsEditing(false); setEditingOrderId(undefined); setOpenNew(true); }}>
             <Plus className="h-4 w-4" /> Nova O.S.
           </Button>
         </div>
@@ -649,12 +649,12 @@ export default function ServiceOrders() {
 
       <FinancialInfoTip className="px-3 py-2.5" title="Dica das O.S.">Use os filtros para localizar rapidamente uma ordem e acompanhe cada etapa pelo modo Tabela, Cards ou Kanban.</FinancialInfoTip>
 
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
+      <div className="grid grid-cols-1 gap-3 min-[400px]:grid-cols-2 md:grid-cols-5">
         {stats.map((stat) => {
           const StatIcon = stat.icon;
           return <Card key={stat.label} className="group border-border/70 bg-card/80 shadow-sm transition-all duration-200 hover:-translate-y-0.5 hover:border-primary/30 hover:shadow-md">
             <CardContent className="flex items-center justify-between p-3.5 sm:p-4">
-              <div className="min-w-0"><p className="truncate text-[10px] font-bold uppercase tracking-wider text-muted-foreground">{stat.label}</p><p className={cn("mt-1 text-2xl font-bold", stat.color)}>{stat.value}</p></div>
+              <div className="min-w-0"><p className="break-words text-[10px] font-bold uppercase tracking-wider text-muted-foreground">{stat.label}</p><p className={cn("mt-1 text-2xl font-bold", stat.color)}>{stat.value}</p></div>
               <span className={cn("grid h-9 w-9 shrink-0 place-items-center rounded-xl bg-muted/60 transition-transform group-hover:scale-105", stat.color)}><StatIcon className="h-4 w-4" /></span>
             </CardContent>
           </Card>;
@@ -689,13 +689,13 @@ export default function ServiceOrders() {
               </TableHeader>
               <TableBody>
                 {filteredOS.map((os) => (
-                  <TableRow 
-                    key={os.id} 
-                    onClick={() => setSelectedOS(os)} 
+                  <TableRow
+                    key={os.id}
+                    onClick={() => setSelectedOS(os)}
                     className={cn(
-                      "group cursor-pointer transition-all border-l-2 active:scale-[0.998]", 
-                      selectedOS?.id === os.id 
-                        ? "bg-primary/10 border-l-primary shadow-sm" 
+                      "group cursor-pointer transition-all border-l-2 active:scale-[0.998]",
+                      selectedOS?.id === os.id
+                        ? "bg-primary/10 border-l-primary shadow-sm"
                         : "border-l-transparent hover:bg-muted/50"
                     )}
                   >
@@ -730,7 +730,7 @@ export default function ServiceOrders() {
                   <h3 className="text-base font-bold transition-colors group-hover:text-primary">{os.customerName || 'Cliente não informado'}</h3>
                   <p className="flex items-center gap-2 text-xs text-muted-foreground"><User className="h-3 w-3" /> {os.technicianName || 'Sem técnico'}</p>
                 </div>
-                <div className="flex justify-between items-center text-sm pt-2 border-t">
+                <div className="flex flex-col gap-3 border-t pt-3 text-sm sm:flex-row sm:items-center sm:justify-between">
                   <div className="flex flex-col gap-1">
                     <span className="text-xs text-muted-foreground">Prazo</span>
                     <span className="font-medium flex items-center gap-1.5"><Calendar className="h-3 w-3" /> {os.deliveryDate}</span>
@@ -796,16 +796,16 @@ export default function ServiceOrders() {
             </DialogTitle>
           </DialogHeader>
 
-          <div className="custom-scrollbar min-h-0 flex-1 overflow-y-auto p-4 sm:p-5">
+          <div className="custom-scrollbar min-h-0 flex-1 overflow-y-auto p-3 sm:p-5">
             <ServiceOrderForm form={formData} onChange={updateForm} stores={stores} customers={customers} employees={employees} laboratories={laboratories} selectedCompanyId={selectedCompanyId} selectedStoreIds={selectedStoreIds} editing={isEditing} />
           </div>
 
-          <div className="sticky bottom-0 z-10 flex shrink-0 justify-end gap-2 border-t border-border/70 bg-card/95 p-3.5 backdrop-blur sm:p-4">
-            <Button variant="outline" onClick={() => setOpenNew(false)}>
+          <div className="sticky bottom-0 z-10 flex shrink-0 flex-col gap-2 border-t border-border/70 bg-card/95 p-3.5 backdrop-blur sm:flex-row sm:justify-end sm:p-4">
+            <Button variant="outline" className="h-11 w-full sm:h-10 sm:w-auto" onClick={() => setOpenNew(false)}>
               <X className="h-4 w-4 mr-2" /> Cancelar
             </Button>
             <Button
-              className="h-9 gap-2 px-5 font-bold shadow-md shadow-primary/20"
+              className="h-11 w-full gap-2 px-5 font-bold shadow-md shadow-primary/20 sm:h-9 sm:w-auto"
               onClick={handleSave}
               disabled={isSaving}
             >

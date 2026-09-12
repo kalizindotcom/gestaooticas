@@ -59,7 +59,7 @@ export function TopBar() {
               size="sm"
               aria-label={`Empresa: ${currentCompany?.tradeName || 'Todas as empresas'}`}
               title={currentCompany?.tradeName || 'Todas as empresas'}
-              className="h-9 gap-2 border border-border/40 bg-background/40 px-2 text-xs font-semibold transition-all hover:bg-accent hover-lift sm:px-3"
+              className="h-11 min-w-11 gap-2 border border-border/40 bg-background/40 px-2 text-xs font-semibold transition-all hover:bg-accent hover-lift sm:h-9 sm:px-3"
             >
               <Building2 className="h-3.5 w-3.5 text-primary" />
               <span className="hidden sm:inline max-w-[140px] truncate">
@@ -106,7 +106,7 @@ export function TopBar() {
               size="sm"
               aria-label={`Lojas selecionadas: ${selectedStoreIds.length}`}
               title={`${selectedStoreIds.length} loja(s) selecionada(s)`}
-              className="h-9 gap-1.5 border border-border/40 bg-background/40 px-2 text-xs transition-all hover:bg-accent hover-lift sm:gap-2 sm:px-3"
+              className="h-11 min-w-11 gap-1.5 border border-border/40 bg-background/40 px-2 text-xs transition-all hover:bg-accent hover-lift sm:h-9 sm:px-3"
             >
               <Store className="h-3.5 w-3.5 text-primary" />
               <span className="hidden sm:inline font-semibold">
@@ -169,7 +169,7 @@ export function TopBar() {
                   <Button
                     variant="ghost"
                     size="icon"
-                    className="h-8 w-8 opacity-0 group-hover:opacity-100 transition-opacity text-primary hover:bg-primary/10"
+                    className="h-10 w-10 opacity-100 md:h-8 md:w-8 md:opacity-0 md:group-hover:opacity-100 transition-opacity text-primary hover:bg-primary/10"
                     onClick={() => setSelectedStoreIds([store.id])}
                     title="Selecionar apenas esta"
                   >
@@ -189,7 +189,7 @@ export function TopBar() {
               size="sm"
               aria-label={`Período: ${periods.find(p => p.value === period)?.label}`}
               title={periods.find(p => p.value === period)?.label}
-              className="h-9 gap-1.5 border border-border/40 bg-background/40 px-2 text-xs transition-all hover:bg-accent hover-lift sm:gap-2 sm:px-3"
+              className="h-11 min-w-11 gap-1.5 border border-border/40 bg-background/40 px-2 text-xs transition-all hover:bg-accent hover-lift sm:h-9 sm:px-3"
             >
               <CalendarDays className="h-3.5 w-3.5 text-primary" />
               <span className="hidden md:inline font-semibold">

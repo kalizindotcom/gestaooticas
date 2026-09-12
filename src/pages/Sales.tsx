@@ -137,7 +137,7 @@ export default function Sales() {
   const [filterStore, setFilterStore] = useState('all');
   const [filterPayment, setFilterPayment] = useState('all');
   const [sortBy, setSortBy] = useState('date_desc');
-  const [viewMode, setViewMode] = useState<ViewMode>('table');
+  const [viewMode, setViewMode] = useState<ViewMode>(() => typeof window !== 'undefined' && window.matchMedia('(max-width: 639px)').matches ? 'cards' : 'table');
   const [selectedSale, setSelectedSale] = useState<any>(null);
   const [selectedCustomerPreview, setSelectedCustomerPreview] = useState<any>(null);
   const [financialEntry, setFinancialEntry] = useState<any>(null);
@@ -599,7 +599,7 @@ export default function Sales() {
         </CardContent>
       </Card>
 
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
+      <div className="grid grid-cols-1 gap-3 min-[400px]:grid-cols-2 md:grid-cols-3 xl:grid-cols-6">
         <MetricCard label="Vendas" value={String(stats.sales)} helper="no filtro" icon={ShoppingCart} />
         <MetricCard label="Faturamento" value={currency(stats.revenue)} helper="vendas concluídas" icon={Banknote} accent />
         <MetricCard label="Ticket médio" value={currency(stats.average)} helper="por venda concluída" icon={Tag} />
@@ -632,12 +632,12 @@ export default function Sales() {
             <Select value={sortBy} onValueChange={setSortBy}><SelectTrigger className="h-10"><SelectValue placeholder="Ordenar" /></SelectTrigger><SelectContent><SelectItem value="date_desc">Mais recentes</SelectItem><SelectItem value="value_desc">Maior valor</SelectItem><SelectItem value="value_asc">Menor valor</SelectItem><SelectItem value="customer">Cliente</SelectItem><SelectItem value="status">Status</SelectItem></SelectContent></Select>
             <Button variant="outline" onClick={clearFilters} className="h-10 gap-2 border-border/70"><Filter className="h-3.5 w-3.5" /> Limpar</Button>
           </div>
-          <div className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+          <div className="grid grid-cols-[auto_minmax(0,1fr)] items-center gap-2 text-xs text-muted-foreground sm:flex sm:flex-wrap">
             <span className="font-semibold text-foreground">Período:</span>
-            <Input type="date" value={dateFrom} onChange={(event) => setDateFrom(event.target.value)} className="h-8 w-[140px]" aria-label="Data inicial" />
+            <Input type="date" value={dateFrom} onChange={(event) => setDateFrom(event.target.value)} className="h-11 w-full sm:h-9 sm:w-[140px]" aria-label="Data inicial" />
             <span>até</span>
-            <Input type="date" value={dateTo} onChange={(event) => setDateTo(event.target.value)} className="h-8 w-[140px]" aria-label="Data final" />
-            <span className="ml-auto">{sortedSales.length} registro(s) encontrado(s)</span>
+            <Input type="date" value={dateTo} onChange={(event) => setDateTo(event.target.value)} className="h-11 w-full sm:h-9 sm:w-[140px]" aria-label="Data final" />
+            <span className="col-span-2 sm:ml-auto">{sortedSales.length} registro(s) encontrado(s)</span>
           </div>
         </CardHeader>
         <CardContent className="p-0">

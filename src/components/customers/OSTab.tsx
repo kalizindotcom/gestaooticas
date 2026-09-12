@@ -185,17 +185,27 @@ export function OSTab({ customer, autoOpenNew }: OSTabProps) {
 
   return (
     <div className="space-y-4">
-      <div className="flex justify-between items-center mb-4">
-        <div className="relative flex-1 max-w-md">
+      <div className="mb-4 flex flex-col items-stretch gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <div className="relative min-w-0 flex-1 sm:max-w-md">
           <Input placeholder="Buscar O.S., técnico ou serviço..." value={search} onChange={e => setSearch(e.target.value)} className="pl-10 h-10" />
           <FileText className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
         </div>
         <PermissionGate module="service_orders" action="create">
-          <Button className="gap-2 bg-primary text-primary-foreground hover:bg-primary/90" onClick={openNew}><Plus className="h-4 w-4" /> Abrir O.S.</Button>
+          <Button className="h-11 w-full gap-2 bg-primary text-primary-foreground hover:bg-primary/90 sm:w-auto" onClick={openNew}><Plus className="h-4 w-4" /> Abrir O.S.</Button>
         </PermissionGate>
       </div>
 
-      <div className="bg-card border border-border/70 rounded-xl overflow-hidden shadow-sm">
+      <div className="space-y-2 sm:hidden">
+        {filtered.map((os: any) => (
+          <button key={os.id} type="button" onClick={() => setSelectedOS(os)} className="w-full rounded-xl border border-border/70 bg-card p-4 text-left shadow-sm active:bg-muted/50">
+            <div className="flex items-start justify-between gap-3"><div><p className="font-mono text-xs font-bold text-primary">#{String(os.id).slice(0, 8).toUpperCase()}</p><p className="mt-1 font-semibold text-foreground">{formatDateTime(os.date)}</p></div><StatusBadge status={os.status} variant="dot" /></div>
+            <div className="mt-3 grid grid-cols-2 gap-3 border-t border-border/60 pt-3 text-xs"><div><p className="text-muted-foreground">Serviço</p><p className="font-semibold capitalize break-words">{os.serviceType || '-'}</p></div><div><p className="text-muted-foreground">Prioridade</p><PriorityBadge priority={os.priority} /></div><div><p className="text-muted-foreground">Total</p><p className="font-bold text-primary">{formatMoney(os.total)}</p></div><div className="text-right"><span className="inline-flex h-10 w-10 items-center justify-center rounded-lg border border-border/70"><ArrowRight className="h-4 w-4" /></span></div></div>
+          </button>
+        ))}
+        {isLoading && [1, 2, 3].map(row => <div key={`os-mobile-skeleton-${row}`} className="h-28 animate-pulse rounded-xl bg-muted" />)}
+        {!isLoading && filtered.length === 0 && <div className="rounded-xl border border-dashed border-border p-8 text-center text-sm text-muted-foreground">Nenhuma O.S. encontrada.</div>}
+      </div>
+      <div className="hidden overflow-x-auto rounded-xl border border-border/70 bg-card shadow-sm sm:block">
         <Table>
           <TableHeader>
             <TableRow className="bg-muted/40">
@@ -211,7 +221,7 @@ export function OSTab({ customer, autoOpenNew }: OSTabProps) {
                 <TableCell><PriorityBadge priority={os.priority} /></TableCell>
                 <TableCell className="text-right font-bold text-foreground">{formatMoney(os.total)}</TableCell>
                 <TableCell className="text-sm font-medium capitalize flex items-center gap-2"><Wrench className="h-3 w-3 text-muted-foreground" /> {os.serviceType || '-'}</TableCell>
-                <TableCell><Button variant="ghost" size="icon" className="opacity-0 group-hover:opacity-100 transition-opacity"><ArrowRight className="h-4 w-4 text-muted-foreground" /></Button></TableCell>
+                <TableCell><Button variant="ghost" size="icon" className="h-10 w-10 opacity-100 sm:opacity-0 sm:group-hover:opacity-100 transition-opacity"><ArrowRight className="h-4 w-4 text-muted-foreground" /></Button></TableCell>
               </TableRow>
             ))}
             {isLoading && [1, 2, 3].map(row => <TableRow key={`os-skeleton-${row}`}><TableCell colSpan={7} className="h-12"><div className="h-4 w-full animate-pulse rounded bg-muted" /></TableCell></TableRow>)}
@@ -253,9 +263,9 @@ export function OSTab({ customer, autoOpenNew }: OSTabProps) {
               editing={Boolean(editingId)}
             />
           </div>
-          <DialogFooter className="sticky bottom-0 flex items-center justify-between gap-3 border-t border-border/60 bg-card/95 p-4 backdrop-blur sm:p-5">
-            <Button variant="ghost" onClick={() => setNewOSOpen(false)}><X className="mr-2 h-4 w-4" /> Cancelar</Button>
-            <Button className="bg-primary text-primary-foreground hover:bg-primary/90" onClick={handleSave} disabled={saveOrder.isPending}><Save className="mr-2 h-4 w-4" /> {saveOrder.isPending ? 'Salvando...' : editingId ? 'Salvar alterações' : 'Abrir Ordem de Serviço'}</Button>
+          <DialogFooter className="sticky bottom-0 flex flex-col gap-2 border-t border-border/60 bg-card/95 p-3.5 backdrop-blur sm:flex-row sm:items-center sm:justify-between sm:p-5">
+            <Button variant="ghost" className="h-11 w-full sm:w-auto" onClick={() => setNewOSOpen(false)}><X className="mr-2 h-4 w-4" /> Cancelar</Button>
+            <Button className="h-11 w-full bg-primary text-primary-foreground hover:bg-primary/90 sm:w-auto" onClick={handleSave} disabled={saveOrder.isPending}><Save className="mr-2 h-4 w-4" /> {saveOrder.isPending ? 'Salvando...' : editingId ? 'Salvar alterações' : 'Abrir Ordem de Serviço'}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
