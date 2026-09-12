@@ -45,9 +45,9 @@ export function TopBar() {
   };
 
   return (
-    <header className="sticky top-0 z-30 h-16 border-b border-border/60 bg-background/80 backdrop-blur-xl supports-[backdrop-filter]:bg-background/60 animate-fade-in">
-      <div className="flex h-full items-center gap-1.5 px-3 sm:px-4 lg:px-6">
-        <SidebarTrigger className="text-muted-foreground hover:text-foreground hover:bg-muted -ml-1 h-9 w-9 transition-all" />
+    <header className="sticky top-0 z-30 h-14 border-b border-border/60 bg-background/80 backdrop-blur-xl supports-[backdrop-filter]:bg-background/60 animate-fade-in sm:h-16">
+      <div className="flex h-full min-w-0 items-center gap-1 px-2 sm:gap-1.5 sm:px-4 lg:px-6">
+        <SidebarTrigger aria-label="Abrir menu" className="-ml-1 h-9 w-9 shrink-0 text-muted-foreground transition-all hover:bg-muted hover:text-foreground" />
 
         <Separator orientation="vertical" className="h-6 mx-1 hidden sm:block" />
 
@@ -57,7 +57,9 @@ export function TopBar() {
             <Button
               variant="ghost"
               size="sm"
-              className="gap-2 font-semibold text-xs h-9 px-3 hover:bg-accent border border-border/40 bg-background/40 transition-all hover-lift"
+              aria-label={`Empresa: ${currentCompany?.tradeName || 'Todas as empresas'}`}
+              title={currentCompany?.tradeName || 'Todas as empresas'}
+              className="h-9 gap-2 border border-border/40 bg-background/40 px-2 text-xs font-semibold transition-all hover:bg-accent hover-lift sm:px-3"
             >
               <Building2 className="h-3.5 w-3.5 text-primary" />
               <span className="hidden sm:inline max-w-[140px] truncate">
@@ -102,7 +104,9 @@ export function TopBar() {
             <Button
               variant="ghost"
               size="sm"
-              className="gap-2 text-xs h-9 px-3 hover:bg-accent border border-border/40 bg-background/40 transition-all hover-lift"
+              aria-label={`Lojas selecionadas: ${selectedStoreIds.length}`}
+              title={`${selectedStoreIds.length} loja(s) selecionada(s)`}
+              className="h-9 gap-1.5 border border-border/40 bg-background/40 px-2 text-xs transition-all hover:bg-accent hover-lift sm:gap-2 sm:px-3"
             >
               <Store className="h-3.5 w-3.5 text-primary" />
               <span className="hidden sm:inline font-semibold">
@@ -183,7 +187,9 @@ export function TopBar() {
             <Button
               variant="ghost"
               size="sm"
-              className="gap-2 text-xs h-9 px-3 hover:bg-accent border border-border/40 bg-background/40 transition-all hover-lift"
+              aria-label={`Período: ${periods.find(p => p.value === period)?.label}`}
+              title={periods.find(p => p.value === period)?.label}
+              className="h-9 gap-1.5 border border-border/40 bg-background/40 px-2 text-xs transition-all hover:bg-accent hover-lift sm:gap-2 sm:px-3"
             >
               <CalendarDays className="h-3.5 w-3.5 text-primary" />
               <span className="hidden md:inline font-semibold">

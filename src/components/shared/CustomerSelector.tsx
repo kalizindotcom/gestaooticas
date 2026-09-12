@@ -86,7 +86,7 @@ export function CustomerSelector({
           <ChevronsUpDown className="ml-2 h-4 w-4 shrink-0 opacity-50" />
         </Button>
       </PopoverTrigger>
-      <PopoverContent className="p-0 w-[--radix-popover-trigger-width]" align="start">
+      <PopoverContent className="w-[min(var(--radix-popover-trigger-width),calc(100vw-1rem))] p-0" align="start">
         <Command className="w-full">
           <CommandInput value={search} onValueChange={setSearch} placeholder="Buscar por nome, apelido, CPF/CNPJ ou telefone..." className="h-9" />
           <CommandList className="max-h-[300px]">

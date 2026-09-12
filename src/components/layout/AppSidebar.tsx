@@ -53,6 +53,7 @@ const systemNav: NavItem[] = [
 function NavGroup({ label, items, collapsed }: { label: string; items: NavItem[]; collapsed: boolean }) {
   const location = useLocation();
   const { hasPermission, role } = usePermissions();
+  const { isMobile, setOpenMobile } = useSidebar();
 
   const filteredItems = items.filter(item => {
     if (item.module === 'profile') return true;
@@ -78,6 +79,9 @@ function NavGroup({ label, items, collapsed }: { label: string; items: NavItem[]
                 <SidebarMenuButton asChild tooltip={collapsed ? item.title : undefined}>
                   <NavLink
                     to={item.url}
+                    onClick={() => {
+                      if (isMobile) setOpenMobile(false);
+                    }}
                     className={cn(
                       'group relative flex items-center gap-3 px-3 py-2.5 rounded-xl text-[13px] transition-all duration-300 overflow-hidden',
                       isActive

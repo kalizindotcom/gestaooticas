@@ -25,7 +25,7 @@ export function KPICard({ title, value, change, changeLabel, icon: Icon, format,
 
   return (
     <div className={cn(
-      "group relative bg-card rounded-2xl border border-border/60 p-5 transition-all duration-500 overflow-hidden hover-lift hover:border-primary/30",
+      "group relative min-w-0 overflow-hidden rounded-2xl border border-border/60 bg-card p-3 transition-all duration-500 hover-lift hover:border-primary/30 sm:p-5",
       "before:absolute before:inset-0 before:rounded-2xl before:bg-gradient-to-br before:from-primary/[0.03] before:via-transparent before:to-orange-500/[0.03] before:opacity-0 hover:before:opacity-100 before:transition-opacity",
       className
     )}>
@@ -33,10 +33,10 @@ export function KPICard({ title, value, change, changeLabel, icon: Icon, format,
       <div className="pointer-events-none absolute -top-12 -right-12 h-32 w-32 rounded-full bg-primary/20 blur-2xl opacity-0 group-hover:opacity-100 transition-opacity duration-500" />
 
       <div className="relative">
-        <div className="flex items-center justify-between mb-4">
+        <div className="mb-3 flex items-center justify-between gap-2 sm:mb-4">
           <div className="relative">
             <div className="absolute inset-0 rounded-xl bg-gradient-to-br from-primary to-orange-700 blur-md opacity-30 group-hover:opacity-60 transition-opacity" />
-            <div className="relative h-10 w-10 rounded-xl bg-gradient-to-br from-primary to-orange-700 grid place-items-center shadow-lg shadow-primary/20 group-hover:scale-110 transition-transform duration-500">
+            <div className="relative grid h-9 w-9 place-items-center rounded-xl bg-gradient-to-br from-primary to-orange-700 shadow-lg shadow-primary/20 transition-transform duration-500 group-hover:scale-110 sm:h-10 sm:w-10">
               <Icon className="h-[18px] w-[18px] text-white" strokeWidth={2.2} />
             </div>
           </div>
@@ -47,10 +47,10 @@ export function KPICard({ title, value, change, changeLabel, icon: Icon, format,
             </div>
           )}
         </div>
-        <p className="text-[28px] font-heading font-black text-foreground leading-none mb-1.5 tabular-nums tracking-tight">
+        <p className="mb-1.5 text-2xl font-heading font-black leading-none tracking-tight text-foreground tabular-nums sm:text-[28px]">
           {formattedValue}
         </p>
-        <p className="text-[11px] text-muted-foreground font-semibold uppercase tracking-[0.1em]">
+        <p className="text-[10px] font-semibold uppercase leading-tight tracking-[0.08em] text-muted-foreground sm:text-[11px] sm:tracking-[0.1em]">
           {title}
         </p>
         {changeLabel && <p className="text-[10px] text-muted-foreground/60 mt-1">{changeLabel}</p>}

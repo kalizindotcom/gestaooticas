@@ -1,4 +1,5 @@
 import { useMemo } from "react";
+import { Link } from "react-router-dom";
 import {
   Calendar, Users, ShoppingCart, DollarSign, TrendingUp, UserPlus,
   Target, Clock, BarChart3, ArrowRight
@@ -112,7 +113,7 @@ export default function Dashboard() {
       <FinancialInfoTip className="px-3 py-2.5" title="Dica do painel">Acompanhe vendas, faturamento e agendamentos em conjunto para identificar rapidamente mudanças no desempenho das óticas.</FinancialInfoTip>
 
       {/* KPI Cards */}
-      <div className="grid grid-cols-2 md:grid-cols-3 xl:grid-cols-6 gap-3 sm:gap-4">
+      <div className="grid grid-cols-2 gap-2.5 sm:gap-4 md:grid-cols-3 xl:grid-cols-6">
         {([
           { title: 'Agendamentos', value: stats.totalAppointments, change: 12, icon: Calendar },
           { title: 'Novos Clientes', value: stats.newCustomers, change: 8, icon: UserPlus },
@@ -137,18 +138,18 @@ export default function Dashboard() {
           <Card className="premium-shadow border-border/60 hover-lift overflow-hidden relative">
             <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-primary/40 to-transparent" />
             <CardHeader className="pb-1">
-              <div className="flex items-center justify-between">
-                <CardTitle className="text-sm font-bold font-heading flex items-center gap-2.5">
+              <div className="flex items-center justify-between gap-2">
+                <CardTitle className="flex min-w-0 items-center gap-2 text-sm font-bold font-heading">
                   <div className="h-8 w-8 rounded-xl bg-gradient-to-br from-primary to-purple-600 grid place-items-center shadow-md shadow-primary/20">
                     <BarChart3 className="h-3.5 w-3.5 text-white" />
                   </div>
-                  Faturamento vs Meta
+                  <span className="truncate">Faturamento vs Meta</span>
                 </CardTitle>
                 <Badge variant="secondary" className="text-[10px] font-bold">Mensal</Badge>
               </div>
             </CardHeader>
-            <CardContent className="pt-2">
-              <ResponsiveContainer width="100%" height={280}>
+            <CardContent className="min-w-0 pt-2">
+              <ResponsiveContainer width="100%" height={260} minWidth={0}>
                 <AreaChart data={chartData}>
                   <defs>
                     <linearGradient id="revGrad" x1="0" y1="0" x2="0" y2="1">
@@ -182,9 +183,9 @@ export default function Dashboard() {
                 Agendamentos
               </CardTitle>
             </CardHeader>
-            <CardContent className="flex flex-col items-center pt-2">
-              <div className="relative">
-                <ResponsiveContainer width={200} height={200}>
+            <CardContent className="flex min-w-0 flex-col items-center pt-2">
+              <div className="relative w-full max-w-[200px]">
+                <ResponsiveContainer width="100%" height={200} minWidth={0}>
                   <PieChart>
                     <Pie
                       data={pieData}
@@ -235,8 +236,8 @@ export default function Dashboard() {
                   </div>
                   Ranking por Loja
                 </CardTitle>
-                <Button variant="ghost" size="sm" className="text-[11px] h-7 gap-1 text-primary hover:text-primary font-bold">
-                  Ver todos <ArrowRight className="h-3 w-3" />
+                <Button asChild variant="ghost" size="sm" className="h-8 gap-1 px-2 text-[11px] font-bold text-primary hover:text-primary">
+                  <Link to="/reports">Ver todos <ArrowRight className="h-3 w-3" /></Link>
                 </Button>
               </div>
             </CardHeader>
