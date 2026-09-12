@@ -783,7 +783,19 @@ export default function Products() {
 
           <Card className="premium-shadow border-border/60 overflow-hidden rounded-2xl">
             <CardContent className="p-0">
-              <div className="overflow-x-auto">
+              <div className="divide-y divide-border/50 md:hidden">
+                {filteredProducts.length === 0 ? <div className="px-4 py-14 text-center text-sm text-muted-foreground">Nenhum produto encontrado com os filtros atuais.</div> : catalogRows.map((p: any) => {
+                  const effectiveStoreIds = localStoreFilter === 'all' ? selectedStoreIds : [localStoreFilter];
+                  const totalStock = Array.isArray(p.product_stock) ? p.product_stock.filter((s: any) => effectiveStoreIds.includes(s.store_id)).reduce((acc: number, s: any) => acc + (s.quantity || 0), 0) : 0;
+                  const isOutOfStock = totalStock === 0;
+                  return <button key={p.id} type="button" onClick={() => openProductDetail(p)} className="flex w-full items-center gap-3 px-4 py-3.5 text-left transition-colors hover:bg-muted/40 active:bg-muted/60">
+                    <div className="grid h-11 w-11 shrink-0 place-items-center overflow-hidden rounded-xl border border-border/60 bg-muted">{p.image_url ? <img src={p.image_url} alt="" className="h-full w-full object-cover" /> : <PackageIcon className="h-5 w-5 text-muted-foreground/50" />}</div>
+                    <div className="min-w-0 flex-1"><p className="truncate text-sm font-bold">{p.name}</p><p className="mt-0.5 truncate text-[11px] text-muted-foreground">{p.category || 'Sem categoria'} · SKU {p.sku || '—'}</p><p className="mt-1 text-xs font-black text-primary">R$ {(p.price || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</p></div>
+                    <div className="shrink-0 text-right"><span className={cn('text-xs font-black', isOutOfStock ? 'text-destructive' : totalStock <= 5 ? 'text-amber-600' : 'text-emerald-600')}>{canViewStock ? totalStock : '—'}</span><p className="text-[9px] uppercase tracking-wider text-muted-foreground">estoque</p><ChevronRight className="ml-auto mt-1 h-4 w-4 text-muted-foreground/60" /></div>
+                  </button>;
+                })}
+              </div>
+              <div className="hidden overflow-x-auto md:block">
                 <Table>
                   <TableHeader>
                     <TableRow className="hover:bg-transparent border-border/60 bg-muted/30">

@@ -9,10 +9,15 @@ import { Label } from '@/components/ui/label';
 import { useAuth } from '@/contexts/AuthContext';
 import { cn } from '@/lib/utils';
 import { FinancialInfoTip } from '@/components/financial/FinancialInfoTip';
+import { localApi } from '@/lib/localApi';
+import { toast } from 'sonner';
 
 export default function Profile() {
   const { user } = useAuth();
   const [birthDate, setBirthDate] = useState('1990-01-01');
+  const [name, setName] = useState(user?.name || '');
+  const [phone, setPhone] = useState('');
+  const [saving, setSaving] = useState(false);
 
   const calculateAge = (date: string) => {
     if (!date) return null;
@@ -31,6 +36,15 @@ export default function Profile() {
   };
 
   const age = calculateAge(birthDate);
+
+  const handleSave = async () => {
+    if (!user?.id || !name.trim()) return toast.error('Informe seu nome completo.');
+    setSaving(true);
+    const result = await localApi.admin.updateUser(String(user.id), { name: name.trim(), email: user.email });
+    setSaving(false);
+    if (result.error) return toast.error(result.error.message || 'Não foi possível salvar seu perfil.');
+    toast.success('Perfil atualizado com sucesso.');
+  };
 
   return (
     <div className="space-y-6">
@@ -102,7 +116,8 @@ export default function Profile() {
                 <div className="space-y-2 animate-fade-in-up" style={{ animationDelay: "250ms" }}>
                   <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Nome completo</Label>
                   <Input
-                    defaultValue={user?.name}
+                    value={name}
+                    onChange={(event) => setName(event.target.value)}
                     className="h-11 bg-background/40 border-border/60 rounded-xl focus-visible:border-primary/40 focus-visible:ring-0"
                   />
                 </div>
@@ -127,6 +142,8 @@ export default function Profile() {
                 <div className="space-y-2 animate-fade-in-up" style={{ animationDelay: "400ms" }}>
                   <Label className="text-xs font-bold uppercase tracking-wider text-muted-foreground">Telefone</Label>
                   <Input
+                    value={phone}
+                    onChange={(event) => setPhone(event.target.value)}
                     placeholder="(11) 99999-0000"
                     className="h-11 bg-background/40 border-border/60 rounded-xl focus-visible:border-primary/40 focus-visible:ring-0"
                   />
@@ -134,10 +151,12 @@ export default function Profile() {
               </div>
               <div className="pt-2 border-t border-border/40 animate-fade-in-up" style={{ animationDelay: "450ms" }}>
                 <Button
-                  className="gap-2 btn-shimmer text-white border-0 shadow-lg shadow-primary/30 hover-lift rounded-xl"
+                  className="gap-2 rounded-xl border-0 text-white shadow-lg shadow-primary/30 btn-shimmer hover-lift"
+                  onClick={() => void handleSave()}
+                  disabled={saving}
                 >
                   <Save className="h-4 w-4" />
-                  Salvar Alterações
+                  {saving ? 'Salvando...' : 'Salvar Alterações'}
                 </Button>
               </div>
             </CardContent>

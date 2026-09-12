@@ -82,7 +82,7 @@ export default function AdminCenter() {
       </div>
 
       {/* Quick Actions com glass + hover-lift */}
-      <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 md:grid-cols-4">
         {[
           { label: 'Nova Empresa', icon: Building2, desc: 'Cadastrar empresa', path: '/companies', gradient: 'from-blue-500 to-indigo-600' },
           { label: 'Nova Loja', icon: Store, desc: 'Adicionar unidade', path: '/stores', gradient: 'from-emerald-500 to-teal-600' },
@@ -96,7 +96,7 @@ export default function AdminCenter() {
             onClick={() => navigate(action.path)}
           >
             <div className={`absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity bg-gradient-to-br ${action.gradient}`} style={{ mixBlendMode: 'soft-light' }} />
-            <CardContent className="p-4 flex items-center gap-3 relative">
+            <CardContent className="flex min-h-[72px] items-center gap-3 p-4 relative">
               <div className={`h-10 w-10 rounded-xl grid place-items-center shrink-0 shadow-md bg-gradient-to-br ${action.gradient} group-hover:scale-110 transition-transform`}>
                 <action.icon className="h-4 w-4 text-white" strokeWidth={2.2} />
               </div>

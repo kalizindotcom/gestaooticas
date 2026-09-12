@@ -295,11 +295,11 @@ export default function Settings() {
       <FinancialInfoTip className="px-3 py-2.5" title="Central de proteção de dados">Configure cópias locais e externas, acompanhe o histórico e faça uma restauração somente após validar o manifesto do backup.</FinancialInfoTip>
 
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-        <TabsList className="grid h-auto w-full grid-cols-2 gap-1 md:grid-cols-4">
-          <TabsTrigger value="geral" className="text-xs">Geral</TabsTrigger>
-          <TabsTrigger value="backup" className="gap-1.5 text-xs"><ShieldCheck className="h-3.5 w-3.5" /> Backup e recuperação</TabsTrigger>
-          <TabsTrigger value="drive" className="gap-1.5 text-xs"><Cloud className="h-3.5 w-3.5" /> Google Drive</TabsTrigger>
-          <TabsTrigger value="historico" className="gap-1.5 text-xs"><History className="h-3.5 w-3.5" /> Histórico</TabsTrigger>
+        <TabsList className="flex h-auto w-full gap-1 overflow-x-auto overscroll-x-contain no-scrollbar p-1 sm:grid sm:grid-cols-2 md:grid-cols-4">
+          <TabsTrigger value="geral" className="min-w-[92px] shrink-0 text-xs">Geral</TabsTrigger>
+          <TabsTrigger value="backup" className="min-w-[172px] shrink-0 gap-1.5 text-xs"><ShieldCheck className="h-3.5 w-3.5" /> Backup e recuperação</TabsTrigger>
+          <TabsTrigger value="drive" className="min-w-[135px] shrink-0 gap-1.5 text-xs"><Cloud className="h-3.5 w-3.5" /> Google Drive</TabsTrigger>
+          <TabsTrigger value="historico" className="min-w-[112px] shrink-0 gap-1.5 text-xs"><History className="h-3.5 w-3.5" /> Histórico</TabsTrigger>
         </TabsList>
 
         <TabsContent value="geral" className="mt-6 space-y-6">

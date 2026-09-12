@@ -41,6 +41,7 @@ import { useQuery } from '@tanstack/react-query';
 import { localApi } from '@/lib/localApi';
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import type { PermissionAction } from '@/types/permissions';
+import { MobileFilterField, MobileFiltersButton, MobileFiltersDialog } from '@/components/shared/MobileFiltersDialog';
 
 const MODULES: Array<{ id: string; title: string; fullTitle: string; icon: any; tip: string; permission: PermissionAction }> = [
   { id: 'statement', title: 'Extrato', fullTitle: 'Extrato Financeiro', icon: Receipt, tip: 'Use o filtro por categoria para identificar onde sua empresa mais gasta.', permission: 'view_statement' },
@@ -101,6 +102,7 @@ export default function Financial({ initialModule = 'statement' }: { initialModu
   const [entryExitType, setEntryExitType] = useState<'in' | 'out' | null>(null);
   const [debtorsDialogOpen, setDebtorsDialogOpen] = useState(false);
   const [bannerDismissed, setBannerDismissed] = useState(false);
+  const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
   const [globalDateRange, setGlobalDateRange] = useState<DateRange | undefined>({
     from: new Date(new Date().getFullYear(), new Date().getMonth(), 1),
     to: new Date(),
@@ -418,7 +420,7 @@ export default function Financial({ initialModule = 'statement' }: { initialModu
       </div>
 
       {/* ============ FILTROS GLOBAIS ============ */}
-      <div className="flex w-full flex-wrap items-center gap-x-3 gap-y-1.5 rounded-2xl border border-border bg-card px-3 py-2 shadow-sm">
+      <div className="hidden w-full flex-wrap items-center gap-x-3 gap-y-1.5 rounded-2xl border border-border bg-card px-3 py-2 shadow-sm sm:flex">
         <div className="flex shrink-0 items-center gap-2 text-xs font-black uppercase tracking-[0.16em] text-foreground"><StoreFilterIcon className="h-4 w-4 text-primary" />Filtros</div>
         <span className="hidden h-5 w-px bg-border sm:block" />
         <div className="flex min-w-0 flex-1 items-center gap-2 sm:min-w-[250px] sm:max-w-[460px]">
@@ -434,6 +436,32 @@ export default function Financial({ initialModule = 'statement' }: { initialModu
           <div className="w-auto"><PeriodPicker dateRange={globalDateRange} setDateRange={setGlobalDateRange} /></div>
         </div>
       </div>
+
+      <div className="flex items-center gap-2 sm:hidden">
+        <MobileFiltersButton activeCount={(selectedStoreIds.length > 0 ? 1 : 0) + (globalDateRange?.from ? 1 : 0)} onClick={() => setMobileFiltersOpen(true)} className="flex-1" />
+        <div className="min-w-0 flex-1 truncate rounded-xl border border-border bg-card px-3 py-2.5 text-center text-[11px] font-bold text-muted-foreground">{activeModuleData.title}</div>
+      </div>
+
+      <MobileFiltersDialog
+        open={mobileFiltersOpen}
+        onOpenChange={setMobileFiltersOpen}
+        title="Filtros financeiros"
+        description="Escolha a loja e o período da visão consolidada."
+        activeCount={(selectedStoreIds.length > 0 ? 1 : 0) + (globalDateRange?.from ? 1 : 0)}
+        onClear={() => { setSelectedStoreIds(availableStores.map(store => store.id)); setGlobalDateRange({ from: new Date(new Date().getFullYear(), new Date().getMonth(), 1), to: new Date() }); }}
+      >
+        <div className="space-y-4">
+          <MobileFilterField label="Loja">
+            <Select value={storeFilterValue} onValueChange={(value) => value === 'all' ? setSelectedStoreIds(availableStores.map(store => store.id)) : setSelectedStoreIds([value])}>
+              <SelectTrigger className="h-11 w-full rounded-xl"><SelectValue /></SelectTrigger>
+              <SelectContent><SelectItem value="all">Todas as lojas</SelectItem>{availableStores.map(store => <SelectItem key={store.id} value={store.id}>{store.name}</SelectItem>)}</SelectContent>
+            </Select>
+          </MobileFilterField>
+          <MobileFilterField label="Período">
+            <PeriodPicker dateRange={globalDateRange} setDateRange={setGlobalDateRange} />
+          </MobileFilterField>
+        </div>
+      </MobileFiltersDialog>
 
       {/* ============ GRÁFICO + PROJEÇÃO + AGING ============ */}
       <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 sm:gap-6">
@@ -709,7 +737,7 @@ export default function Financial({ initialModule = 'statement' }: { initialModu
       {/* ============ ABAS DE MÓDULOS ============ */}
       <div className="animate-fade-in-up" style={{ animationDelay: '1000ms' }}>
         <div className="bg-card/60 backdrop-blur-sm border border-border/60 rounded-2xl p-1.5 hover-lift">
-          <div className="flex flex-wrap gap-1">
+          <div className="flex gap-1 overflow-x-auto overscroll-x-contain no-scrollbar sm:flex-wrap">
             {visibleModules.map(m => {
               const isActive = activeModuleId === m.id;
               return (
@@ -717,7 +745,7 @@ export default function Financial({ initialModule = 'statement' }: { initialModu
                   key={m.id}
                   onClick={() => setActiveModule(m.id)}
                                       className={cn(
-                    "group relative flex flex-1 sm:flex-none items-center justify-center gap-2 px-3.5 py-2.5 text-xs font-bold rounded-xl transition-all overflow-hidden",
+                    "group relative flex min-w-[112px] shrink-0 items-center justify-center gap-2 rounded-xl px-3.5 py-2.5 text-xs font-bold transition-all overflow-hidden sm:min-w-0",
                     isActive
                       ? "bg-primary text-primary-foreground shadow-md shadow-primary/20"
                       : "text-muted-foreground hover:bg-muted hover:text-foreground"

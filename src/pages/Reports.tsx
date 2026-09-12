@@ -24,6 +24,7 @@ import { LoadingSpinner } from '@/components/shared/LoadingSpinner';
 import { EmptyState } from '@/components/shared/EmptyState';
 import { FinancialInfoTip } from '@/components/financial/FinancialInfoTip';
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from '@/components/ui/dialog';
+import { MobileFilterField, MobileFiltersButton, MobileFiltersDialog } from '@/components/shared/MobileFiltersDialog';
 
 const money = (value: number) => `R$ ${Number(value || 0).toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 const number = (value: number) => Number(value || 0).toLocaleString('pt-BR');
@@ -88,6 +89,7 @@ export default function Reports() {
   const [search, setSearch] = useState('');
   const [reportSearch, setReportSearch] = useState('');
   const [showFilters, setShowFilters] = useState(true);
+  const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
   const [isConfigOpen, setIsConfigOpen] = useState(false);
   const [featuredReportIds, setFeaturedReportIds] = useState<string[]>(() => {
     try {
@@ -199,7 +201,7 @@ export default function Reports() {
 
       <FinancialInfoTip className="px-3 py-2.5" title="Dica de análise">Compare sempre períodos equivalentes e mantenha a mesma seleção de lojas antes de concluir uma tendência. Exportações e impressões respeitam os filtros ativos.</FinancialInfoTip>
 
-      {showFilters && <section className="rounded-2xl border border-border/70 bg-card p-3 shadow-sm">
+      {showFilters && <section className="hidden rounded-2xl border border-border/70 bg-card p-3 shadow-sm lg:block">
         <div className="flex flex-col gap-3 xl:flex-row xl:items-center">
           <div className="flex shrink-0 items-center gap-2 xl:w-[185px]"><span className="grid h-8 w-8 place-items-center rounded-lg bg-muted text-muted-foreground"><Filter className="h-3.5 w-3.5" /></span><div><p className="text-xs font-bold">Filtros do painel</p><p className="text-[10px] text-muted-foreground">Aplicados a toda a página</p></div></div>
           <div className="hidden h-8 w-px bg-border xl:block" />
@@ -207,6 +209,32 @@ export default function Reports() {
           <div className="grid min-w-0 flex-[2] gap-2 sm:grid-cols-[150px_170px_minmax(210px,1fr)_auto]"><Select value={period} onValueChange={setPeriod}><SelectTrigger aria-label="Período" className="h-9 rounded-lg bg-background text-xs"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="7d">Últimos 7 dias</SelectItem><SelectItem value="30d">Últimos 30 dias</SelectItem><SelectItem value="90d">Últimos 90 dias</SelectItem><SelectItem value="month">Este mês</SelectItem><SelectItem value="year">Este ano</SelectItem><SelectItem value="all">Todo o histórico</SelectItem></SelectContent></Select><Select value={storeFilter} onValueChange={setStoreFilter}><SelectTrigger aria-label="Loja" className="h-9 rounded-lg bg-background text-xs"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">Todas as lojas selecionadas</SelectItem>{reportStores.map(([id, name]) => <SelectItem key={id} value={String(id)}>{name}</SelectItem>)}</SelectContent></Select><div className="relative"><Search className="absolute left-3 top-2.5 h-3.5 w-3.5 text-muted-foreground" /><Input aria-label="Busca contextual" className="h-9 rounded-lg bg-background pl-9 text-xs" value={search} onChange={event => setSearch(event.target.value)} placeholder="Cliente ou vendedor..." /></div><Button type="button" variant="ghost" size="sm" className="h-9 rounded-lg px-3 text-xs text-muted-foreground" onClick={() => { setPeriod('year'); setStoreFilter('all'); setSearch(''); }}>Limpar</Button></div>
         </div>
       </section>}
+
+      <div className="flex items-center gap-2 lg:hidden">
+        <MobileFiltersButton activeCount={(period !== 'year' ? 1 : 0) + (storeFilter !== 'all' ? 1 : 0) + (search ? 1 : 0)} onClick={() => setMobileFiltersOpen(true)} className="flex-1" />
+        <Button type="button" variant="outline" size="sm" className="h-10 rounded-xl px-3 text-xs" onClick={() => setShowFilters(value => !value)}>{showFilters ? 'Ocultar' : 'Mostrar'} desktop</Button>
+      </div>
+
+      <MobileFiltersDialog
+        open={mobileFiltersOpen}
+        onOpenChange={setMobileFiltersOpen}
+        title="Filtros dos relatórios"
+        description="Esses filtros atualizam os indicadores, gráficos e relatórios detalhados."
+        activeCount={(period !== 'year' ? 1 : 0) + (storeFilter !== 'all' ? 1 : 0) + (search ? 1 : 0)}
+        onClear={() => { setPeriod('year'); setStoreFilter('all'); setSearch(''); }}
+      >
+        <div className="space-y-4">
+          <MobileFilterField label="Período">
+            <Select value={period} onValueChange={setPeriod}><SelectTrigger className="h-11 w-full rounded-xl"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="7d">Últimos 7 dias</SelectItem><SelectItem value="30d">Últimos 30 dias</SelectItem><SelectItem value="90d">Últimos 90 dias</SelectItem><SelectItem value="month">Este mês</SelectItem><SelectItem value="year">Este ano</SelectItem><SelectItem value="all">Todo o histórico</SelectItem></SelectContent></Select>
+          </MobileFilterField>
+          <MobileFilterField label="Loja">
+            <Select value={storeFilter} onValueChange={setStoreFilter}><SelectTrigger className="h-11 w-full rounded-xl"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="all">Todas as lojas selecionadas</SelectItem>{reportStores.map(([id, name]) => <SelectItem key={id} value={String(id)}>{name}</SelectItem>)}</SelectContent></Select>
+          </MobileFilterField>
+          <MobileFilterField label="Busca contextual">
+            <div className="relative"><Search className="pointer-events-none absolute left-3 top-3 h-4 w-4 text-muted-foreground" /><Input aria-label="Busca contextual" className="h-11 rounded-xl pl-9" value={search} onChange={event => setSearch(event.target.value)} placeholder="Cliente ou vendedor..." /></div>
+          </MobileFilterField>
+        </div>
+      </MobileFiltersDialog>
 
       <section className="grid grid-cols-2 gap-2.5 md:grid-cols-3 xl:grid-cols-6">
         {[
