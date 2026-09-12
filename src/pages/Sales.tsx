@@ -142,6 +142,7 @@ export default function Sales() {
   const [selectedCustomerPreview, setSelectedCustomerPreview] = useState<any>(null);
   const [financialEntry, setFinancialEntry] = useState<any>(null);
   const [isPreparingFiscal, setIsPreparingFiscal] = useState(false);
+  const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
 
   const [isNewSaleOpen, setIsNewSaleOpen] = useState(false);
   const [saleStep, setSaleStep] = useState<SaleStep>(1);
@@ -295,6 +296,16 @@ export default function Sales() {
     setFilterStore('all');
     setFilterPayment('all');
   };
+
+  const activeFilterCount = [
+    searchValue.trim(),
+    dateFrom,
+    dateTo,
+    filterSeller !== 'all' ? filterSeller : '',
+    filterStatus !== 'all' ? filterStatus : '',
+    filterStore !== 'all' ? filterStore : '',
+    filterPayment !== 'all' ? filterPayment : '',
+  ].filter(Boolean).length;
 
   const setDatePreset = (preset: 'today' | 'week' | 'month' | 'all') => {
     const today = new Date();
@@ -620,7 +631,21 @@ export default function Sales() {
               <Button variant="ghost" size="sm" onClick={() => setViewMode('cards')} className={cn('h-8 gap-1.5 px-3 text-xs', viewMode === 'cards' && 'bg-card text-primary shadow-sm')}><LayoutGrid className="h-3.5 w-3.5" /> Cards</Button>
             </div>
           </div>
-          <div className="grid gap-2.5 sm:gap-3 md:grid-cols-2 xl:grid-cols-[minmax(220px,1.4fr)_150px_150px_150px_150px_150px_auto]">
+          <div className="space-y-2 sm:hidden">
+            <div className="relative">
+              <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
+              <Input value={searchValue} onChange={(event) => setSearchValue(event.target.value)} placeholder="Buscar venda ou cliente..." className="h-11 pl-9" />
+            </div>
+            <div className="flex gap-2">
+              <Button type="button" variant="outline" onClick={() => setMobileFiltersOpen(true)} className="h-11 min-w-0 flex-1 justify-center gap-2 border-primary/30 bg-primary/[0.04]">
+                <Filter className="h-4 w-4 text-primary" />
+                <span>Filtros</span>
+                {activeFilterCount > 0 && <Badge className="h-5 min-w-5 rounded-full bg-primary px-1.5 text-[10px] text-primary-foreground hover:bg-primary">{activeFilterCount}</Badge>}
+              </Button>
+              {activeFilterCount > 0 && <Button type="button" variant="ghost" onClick={clearFilters} className="h-11 shrink-0 px-3 text-xs text-muted-foreground">Limpar</Button>}
+            </div>
+          </div>
+          <div className="hidden gap-2.5 sm:grid sm:gap-3 md:grid-cols-2 xl:grid-cols-[minmax(220px,1.4fr)_150px_150px_150px_150px_150px_auto]">
             <div className="relative">
               <Search className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
               <Input value={searchValue} onChange={(event) => setSearchValue(event.target.value)} placeholder="Buscar venda ou cliente..." className="h-10 pl-9" />
@@ -632,12 +657,12 @@ export default function Sales() {
             <Select value={sortBy} onValueChange={setSortBy}><SelectTrigger className="h-10"><SelectValue placeholder="Ordenar" /></SelectTrigger><SelectContent><SelectItem value="date_desc">Mais recentes</SelectItem><SelectItem value="value_desc">Maior valor</SelectItem><SelectItem value="value_asc">Menor valor</SelectItem><SelectItem value="customer">Cliente</SelectItem><SelectItem value="status">Status</SelectItem></SelectContent></Select>
             <Button variant="outline" onClick={clearFilters} className="h-10 gap-2 border-border/70"><Filter className="h-3.5 w-3.5" /> Limpar</Button>
           </div>
-          <div className="grid grid-cols-2 items-center gap-2 text-xs text-muted-foreground sm:flex sm:flex-wrap">
-            <span className="col-span-2 font-semibold text-foreground sm:col-span-1">Período:</span>
-            <Input type="date" value={dateFrom} onChange={(event) => setDateFrom(event.target.value)} className="h-11 w-full min-w-0 sm:h-9 sm:w-[140px]" aria-label="Data inicial" />
-            <span className="text-center sm:text-left">até</span>
-            <Input type="date" value={dateTo} onChange={(event) => setDateTo(event.target.value)} className="h-11 w-full sm:h-9 sm:w-[140px]" aria-label="Data final" />
-            <span className="col-span-2 text-[11px] sm:ml-auto sm:col-span-1">{sortedSales.length} registro(s) encontrado(s)</span>
+          <div className="hidden grid-cols-2 items-center gap-2 text-xs text-muted-foreground sm:flex sm:flex-wrap">
+            <span className="font-semibold text-foreground">Período:</span>
+            <Input type="date" value={dateFrom} onChange={(event) => setDateFrom(event.target.value)} className="h-9 w-[140px]" aria-label="Data inicial" />
+            <span>até</span>
+            <Input type="date" value={dateTo} onChange={(event) => setDateTo(event.target.value)} className="h-9 w-[140px]" aria-label="Data final" />
+            <span className="ml-auto text-[11px]">{sortedSales.length} registro(s) encontrado(s)</span>
           </div>
         </CardHeader>
         <CardContent className="p-0">
@@ -688,6 +713,41 @@ export default function Sales() {
           )}
         </CardContent>
       </Card>
+
+      <Dialog open={mobileFiltersOpen} onOpenChange={setMobileFiltersOpen}>
+        <DialogContent className="flex max-h-[calc(100dvh-1rem)] w-[calc(100vw-1rem)] max-w-md flex-col gap-0 overflow-hidden rounded-2xl border-border/80 bg-background p-0 sm:hidden">
+          <DialogHeader className="shrink-0 border-b border-border/70 bg-card px-4 py-4">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <DialogTitle className="flex items-center gap-2 text-base"><span className="flex h-8 w-8 items-center justify-center rounded-xl bg-primary/10 text-primary"><Filter className="h-4 w-4" /></span> Filtrar vendas</DialogTitle>
+                <DialogDescription className="mt-1 text-xs">Refine os resultados sem ocupar a tela inteira.</DialogDescription>
+              </div>
+              {activeFilterCount > 0 && <Badge variant="secondary" className="shrink-0 rounded-full px-2.5 py-1 text-[10px]">{activeFilterCount} ativo(s)</Badge>}
+            </div>
+          </DialogHeader>
+          <div className="min-h-0 flex-1 space-y-4 overflow-y-auto p-4">
+            <div className="space-y-2">
+              <Label>Ordenar resultados</Label>
+              <Select value={sortBy} onValueChange={setSortBy}><SelectTrigger className="h-11"><SelectValue /></SelectTrigger><SelectContent><SelectItem value="date_desc">Mais recentes</SelectItem><SelectItem value="value_desc">Maior valor</SelectItem><SelectItem value="value_asc">Menor valor</SelectItem><SelectItem value="customer">Cliente</SelectItem><SelectItem value="status">Status</SelectItem></SelectContent></Select>
+            </div>
+            <div className="grid gap-4 min-[380px]:grid-cols-2">
+              <div className="space-y-2"><Label>Loja</Label><Select value={filterStore} onValueChange={setFilterStore}><SelectTrigger className="h-11"><SelectValue placeholder="Todas as lojas" /></SelectTrigger><SelectContent><SelectItem value="all">Todas as lojas</SelectItem>{availableStores.map((store: any) => <SelectItem key={store.id} value={store.id}>{store.name}</SelectItem>)}</SelectContent></Select></div>
+              <div className="space-y-2"><Label>Vendedor</Label><Select value={filterSeller} onValueChange={setFilterSeller}><SelectTrigger className="h-11"><SelectValue placeholder="Todos os vendedores" /></SelectTrigger><SelectContent><SelectItem value="all">Todos os vendedores</SelectItem>{sellers.map((seller: any) => <SelectItem key={seller.id} value={seller.id}>{seller.name}</SelectItem>)}</SelectContent></Select></div>
+              <div className="space-y-2"><Label>Status</Label><Select value={filterStatus} onValueChange={setFilterStatus}><SelectTrigger className="h-11"><SelectValue placeholder="Todos os status" /></SelectTrigger><SelectContent><SelectItem value="all">Todos os status</SelectItem>{Object.entries(STATUS_LABELS).map(([value, label]) => <SelectItem key={value} value={value}>{label}</SelectItem>)}</SelectContent></Select></div>
+              <div className="space-y-2"><Label>Pagamento</Label><Select value={filterPayment} onValueChange={setFilterPayment}><SelectTrigger className="h-11"><SelectValue placeholder="Todos os pagamentos" /></SelectTrigger><SelectContent><SelectItem value="all">Todos os pagamentos</SelectItem>{Object.entries(PAYMENT_METHODS).map(([value, method]) => <SelectItem key={value} value={value}>{method.label}</SelectItem>)}</SelectContent></Select></div>
+            </div>
+            <div className="space-y-2 rounded-2xl border border-border/70 bg-muted/20 p-3">
+              <Label>Período</Label>
+              <div className="grid grid-cols-[1fr_auto_1fr] items-center gap-2"><Input type="date" value={dateFrom} onChange={(event) => setDateFrom(event.target.value)} className="h-11 min-w-0" aria-label="Data inicial" /><span className="text-xs text-muted-foreground">até</span><Input type="date" value={dateTo} onChange={(event) => setDateTo(event.target.value)} className="h-11 min-w-0" aria-label="Data final" /></div>
+              <div className="flex flex-wrap gap-1.5 pt-1"><Button type="button" variant="ghost" size="sm" onClick={() => setDatePreset('today')} className="h-8 rounded-full bg-card px-3 text-[11px]">Hoje</Button><Button type="button" variant="ghost" size="sm" onClick={() => setDatePreset('week')} className="h-8 rounded-full bg-card px-3 text-[11px]">7 dias</Button><Button type="button" variant="ghost" size="sm" onClick={() => setDatePreset('month')} className="h-8 rounded-full bg-card px-3 text-[11px]">Este mês</Button><Button type="button" variant="ghost" size="sm" onClick={() => setDatePreset('all')} className="h-8 rounded-full bg-card px-3 text-[11px]">Todo período</Button></div>
+            </div>
+          </div>
+          <DialogFooter className="shrink-0 flex-row gap-2 border-t border-border/70 bg-card p-3">
+            <Button type="button" variant="ghost" onClick={clearFilters} className="flex-1 text-muted-foreground">Limpar filtros</Button>
+            <Button type="button" onClick={() => setMobileFiltersOpen(false)} className="flex-1">Aplicar filtros</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <Dialog open={isNewSaleOpen} onOpenChange={(open) => {
         if (open) {
