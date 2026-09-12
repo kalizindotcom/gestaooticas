@@ -1,0 +1,138 @@
+Browserslist: browsers data (caniuse-lite) is 14 months old. Please run:
+  npx update-browserslist-db@latest
+  Why you should do it regularly: https://github.com/browserslist/update-db#readme
+Error: [31m  Failed to scan for dependencies from entries:
+  C:/Users/h2k/Documents/projetos/otica_nordestina-main/index.html
+
+  [39m[31mX [41;31m[[41;97mERROR[41;31m][0m [1mExpected "}" but found ")"[0m
+
+    src/components/service-orders/ServiceOrderForm.tsx:246:191:
+[37m      246 │ ... 'Selecione o cliente primeiro'[32m)[37m, ...availablePrescriptions.ma...
+          │                                   [32m^[37m
+          ╵                                   [32m}[0m
+
+
+    at failureErrorWithLog (C:\Users\h2k\Documents\projetos\otica_nordestina-main\node_modules\vite\node_modules\esbuild\lib\main.js:1472:15)
+    at C:\Users\h2k\Documents\projetos\otica_nordestina-main\node_modules\vite\node_modules\esbuild\lib\main.js:945:25
+    at runOnEndCallbacks (C:\Users\h2k\Documents\projetos\otica_nordestina-main\node_modules\vite\node_modules\esbuild\lib\main.js:1315:45)
+    at buildResponseToResult (C:\Users\h2k\Documents\projetos\otica_nordestina-main\node_modules\vite\node_modules\esbuild\lib\main.js:943:7)
+    at C:\Users\h2k\Documents\projetos\otica_nordestina-main\node_modules\vite\node_modules\esbuild\lib\main.js:955:9
+    at new Promise (<anonymous>)
+    at requestCallbacks.on-end (C:\Users\h2k\Documents\projetos\otica_nordestina-main\node_modules\vite\node_modules\esbuild\lib\main.js:954:54)
+    at handleRequest (C:\Users\h2k\Documents\projetos\otica_nordestina-main\node_modules\vite\node_modules\esbuild\lib\main.js:647:17)
+    at handleIncomingPacket (C:\Users\h2k\Documents\projetos\otica_nordestina-main\node_modules\vite\node_modules\esbuild\lib\main.js:672:7)
+    at Socket.readFromStdout (C:\Users\h2k\Documents\projetos\otica_nordestina-main\node_modules\vite\node_modules\esbuild\lib\main.js:600:7)
+[2m01:15:25[22m [31m[1m[vite][22m[39m Pre-transform error:   x Expected '</', got ')'
+     ,-[C:/Users/h2k/Documents/projetos/otica_nordestina-main/src/components/service-orders/ServiceOrderForm.tsx:246:1]
+ 243 |                 const prescription = availablePrescriptions.find((item: any) => item.id === value);
+ 244 |                 onChange(prescription ? prescriptionToServiceOrderPatch(prescription) : { prescriptionId: '' });
+ 245 |               }}
+ 246 |               options={[{ id: 'none', name: prescriptionCustomerId ? (availablePrescriptions.length ? 'Preencher manualmente' : 'Nenhuma receita disponível') : 'Selecione o cliente primeiro'), ...availablePrescriptions.map((prescription: any) => ({ id: prescription.id, name: `${prescription.issueDate?.split('-').reverse().join('/') || 'Sem data'} · ${prescription.professionalName || 'Profissional não informado'}` }))]}
+     :                                                                                                                                                                                               ^
+ 247 |               placeholder="Selecione uma receita"
+ 248 |             />
+ 249 |             <p className="mt-2 text-[11px] text-muted-foreground">Ao escolher uma receita, os campos abaixo serão preenchidos automaticamente e poderão ser ajustados nesta O.S.</p>
+     `----
+
+
+Caused by:
+    Syntax Error
+[2m01:15:25[22m [31m[1m[vite][22m[39m Pre-transform error:   x Expected '</', got ')'
+     ,-[C:/Users/h2k/Documents/projetos/otica_nordestina-main/src/components/service-orders/ServiceOrderForm.tsx:246:1]
+ 243 |                 const prescription = availablePrescriptions.find((item: any) => item.id === value);
+ 244 |                 onChange(prescription ? prescriptionToServiceOrderPatch(prescription) : { prescriptionId: '' });
+ 245 |               }}
+ 246 |               options={[{ id: 'none', name: prescriptionCustomerId ? (availablePrescriptions.length ? 'Preencher manualmente' : 'Nenhuma receita disponível') : 'Selecione o cliente primeiro'), ...availablePrescriptions.map((prescription: any) => ({ id: prescription.id, name: `${prescription.issueDate?.split('-').reverse().join('/') || 'Sem data'} · ${prescription.professionalName || 'Profissional não informado'}` }))]}
+     :                                                                                                                                                                                               ^
+ 247 |               placeholder="Selecione uma receita"
+ 248 |             />
+ 249 |             <p className="mt-2 text-[11px] text-muted-foreground">Ao escolher uma receita, os campos abaixo serão preenchidos automaticamente e poderão ser ajustados nesta O.S.</p>
+     `----
+
+
+Caused by:
+    Syntax Error
+[2m01:15:27[22m [31m[1m[vite][22m[39m [31mInternal server error:   x Expected '</', got ')'
+     ,-[C:/Users/h2k/Documents/projetos/otica_nordestina-main/src/components/service-orders/ServiceOrderForm.tsx:246:1]
+ 243 |                 const prescription = availablePrescriptions.find((item: any) => item.id === value);
+ 244 |                 onChange(prescription ? prescriptionToServiceOrderPatch(prescription) : { prescriptionId: '' });
+ 245 |               }}
+ 246 |               options={[{ id: 'none', name: prescriptionCustomerId ? (availablePrescriptions.length ? 'Preencher manualmente' : 'Nenhuma receita disponível') : 'Selecione o cliente primeiro'), ...availablePrescriptions.map((prescription: any) => ({ id: prescription.id, name: `${prescription.issueDate?.split('-').reverse().join('/') || 'Sem data'} · ${prescription.professionalName || 'Profissional não informado'}` }))]}
+     :                                                                                                                                                                                               ^
+ 247 |               placeholder="Selecione uma receita"
+ 248 |             />
+ 249 |             <p className="mt-2 text-[11px] text-muted-foreground">Ao escolher uma receita, os campos abaixo serão preenchidos automaticamente e poderão ser ajustados nesta O.S.</p>
+     `----
+
+
+Caused by:
+    Syntax Error[39m
+  Plugin: [35mvite:react-swc[39m
+  File: [36mC:/Users/h2k/Documents/projetos/otica_nordestina-main/src/components/service-orders/ServiceOrderForm.tsx[39m
+  
+[2m02:57:51[22m [31m[1m[vite][22m[39m Pre-transform error:   x Expected ',', got '{'
+   ,-[C:/Users/h2k/Documents/projetos/otica_nordestina-main/src/components/service-orders/ServiceOrderForm.tsx:4:1]
+ 1 | import type { ReactNode } from 'react';
+ 2 | import { Eye, FileText, UserRound, Wallet, Wrench } from 'lucide-react';
+ 3 | import { CustomerSelector } from '@/components/shared/CustomerSelector';
+ 4 | import { prescriptionToServiceOrimport { useCustomerPrescriptions } from '@/hooks/useCustomerData';
+   :                                        ^
+ 5 | import { SERVICE_ORDER_STATUS_FLOW } from '@/lib/serviceOrderStatus';
+ 6 | import { ProductPicker } from '@/components/products/ProductPicker';
+ 7 | import { Input } from '@/components/ui/input';
+   `----
+
+
+Caused by:
+    Syntax Error
+[2m02:57:51[22m [31m[1m[vite][22m[39m Pre-transform error:   x Expected ',', got '{'
+   ,-[C:/Users/h2k/Documents/projetos/otica_nordestina-main/src/components/service-orders/ServiceOrderForm.tsx:4:1]
+ 1 | import type { ReactNode } from 'react';
+ 2 | import { Eye, FileText, UserRound, Wallet, Wrench } from 'lucide-react';
+ 3 | import { CustomerSelector } from '@/components/shared/CustomerSelector';
+ 4 | import { prescriptionToServiceOrimport { useCustomerPrescriptions } from '@/hooks/useCustomerData';
+   :                                        ^
+ 5 | import { SERVICE_ORDER_STATUS_FLOW } from '@/lib/serviceOrderStatus';
+ 6 | import { ProductPicker } from '@/components/products/ProductPicker';
+ 7 | import { Input } from '@/components/ui/input';
+   `----
+
+
+Caused by:
+    Syntax Error
+[2m02:57:51[22m [31m[1m[vite][22m[39m [31mInternal server error:   x Expected ',', got '{'
+   ,-[C:/Users/h2k/Documents/projetos/otica_nordestina-main/src/components/service-orders/ServiceOrderForm.tsx:4:1]
+ 1 | import type { ReactNode } from 'react';
+ 2 | import { Eye, FileText, UserRound, Wallet, Wrench } from 'lucide-react';
+ 3 | import { CustomerSelector } from '@/components/shared/CustomerSelector';
+ 4 | import { prescriptionToServiceOrimport { useCustomerPrescriptions } from '@/hooks/useCustomerData';
+   :                                        ^
+ 5 | import { SERVICE_ORDER_STATUS_FLOW } from '@/lib/serviceOrderStatus';
+ 6 | import { ProductPicker } from '@/components/products/ProductPicker';
+ 7 | import { Input } from '@/components/ui/input';
+   `----
+
+
+Caused by:
+    Syntax Error[39m
+  Plugin: [35mvite:react-swc[39m
+  File: [36mC:/Users/h2k/Documents/projetos/otica_nordestina-main/src/components/service-orders/ServiceOrderForm.tsx[39m
+  
+[2m02:57:51[22m [31m[1m[vite][22m[39m [31mInternal server error:   x Expected ',', got '{'
+   ,-[C:/Users/h2k/Documents/projetos/otica_nordestina-main/src/components/service-orders/ServiceOrderForm.tsx:4:1]
+ 1 | import type { ReactNode } from 'react';
+ 2 | import { Eye, FileText, UserRound, Wallet, Wrench } from 'lucide-react';
+ 3 | import { CustomerSelector } from '@/components/shared/CustomerSelector';
+ 4 | import { prescriptionToServiceOrimport { useCustomerPrescriptions } from '@/hooks/useCustomerData';
+   :                                        ^
+ 5 | import { SERVICE_ORDER_STATUS_FLOW } from '@/lib/serviceOrderStatus';
+ 6 | import { ProductPicker } from '@/components/products/ProductPicker';
+ 7 | import { Input } from '@/components/ui/input';
+   `----
+
+
+Caused by:
+    Syntax Error[39m
+  Plugin: [35mvite:react-swc[39m
+  File: [36mC:/Users/h2k/Documents/projetos/otica_nordestina-main/src/components/service-orders/ServiceOrderForm.tsx[39m
+  
