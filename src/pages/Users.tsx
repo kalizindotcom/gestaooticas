@@ -457,13 +457,13 @@ export default function Users() {
   );
 
   return (
-    <div className="space-y-8">
+    <div className="space-y-4 pb-[max(1.5rem,env(safe-area-inset-bottom))] sm:space-y-8">
       <PageHeader
         title="Usuários & Equipe"
         description="Gerencie acessos, permissões e equipe do sistema"
         actions={
-          <div className="flex gap-2">
-            <Button size="sm" variant="outline" className="gap-2" onClick={() => {
+          <div className="grid w-full grid-cols-2 gap-2 sm:flex sm:w-auto">
+            <Button size="sm" variant="outline" className="w-full gap-2 sm:w-auto" onClick={() => {
               setNewEmployeeData({ name: '', email: '', phone: '', cpf: '', hire_date: '', role: 'seller', commission: 0, company_id: '', store_id: '', status: 'active' });
               setEditingEmployee(null);
               setEmployeeModalOpen(true);
@@ -486,19 +486,19 @@ export default function Users() {
       <FinancialInfoTip className="px-3 py-2.5" title="Dica de acessos">Use perfis para centralizar permissões e personalize apenas as exceções necessárias por usuário. Revise empresa e loja antes de salvar um acesso.</FinancialInfoTip>
 
       <Tabs defaultValue="users">
-        <TabsList className="h-10 p-1">
-          <TabsTrigger value="users" className="text-xs gap-1.5 px-4 rounded-lg">Usuarios do Sistema</TabsTrigger>
-          <TabsTrigger value="employees" className="text-xs gap-1.5 px-4 rounded-lg">Funcionarios / Vendedores</TabsTrigger>
-          <TabsTrigger value="professionals" className="text-xs gap-1.5 px-4 rounded-lg"><Stethoscope className="h-3.5 w-3.5" />Profissionais</TabsTrigger>
-          <TabsTrigger value="establishments" className="text-xs gap-1.5 px-4 rounded-lg"><FlaskConical className="h-3.5 w-3.5" />Estabelecimentos</TabsTrigger>
-          <TabsTrigger value="roles" className="text-xs gap-1.5 px-4 rounded-lg">Perfis de Acesso</TabsTrigger>
-          <TabsTrigger value="permissions" className="text-xs gap-1.5 px-4 rounded-lg">Matriz Global</TabsTrigger>
+        <TabsList className="h-11 w-full justify-start gap-1 overflow-x-auto p-1 sm:w-auto">
+          <TabsTrigger value="users" className="shrink-0 whitespace-nowrap rounded-lg px-3 text-xs sm:px-4">Usuarios do Sistema</TabsTrigger>
+          <TabsTrigger value="employees" className="shrink-0 whitespace-nowrap rounded-lg px-3 text-xs sm:px-4">Funcionarios / Vendedores</TabsTrigger>
+          <TabsTrigger value="professionals" className="shrink-0 whitespace-nowrap rounded-lg px-3 text-xs sm:px-4"><Stethoscope className="h-3.5 w-3.5" />Profissionais</TabsTrigger>
+          <TabsTrigger value="establishments" className="shrink-0 whitespace-nowrap rounded-lg px-3 text-xs sm:px-4"><FlaskConical className="h-3.5 w-3.5" />Estabelecimentos</TabsTrigger>
+          <TabsTrigger value="roles" className="shrink-0 whitespace-nowrap rounded-lg px-3 text-xs sm:px-4">Perfis de Acesso</TabsTrigger>
+          <TabsTrigger value="permissions" className="shrink-0 whitespace-nowrap rounded-lg px-3 text-xs sm:px-4">Matriz Global</TabsTrigger>
         </TabsList>
 
         {/* === USERS TAB === */}
         <TabsContent value="users" className="mt-6 space-y-4">
-          <div className="flex items-center justify-between">
-            <div className="relative w-72">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div className="relative w-full sm:w-72">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <Input placeholder="Buscar usuário..." className="pl-9 h-9 text-sm" value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
             </div>
@@ -507,6 +507,11 @@ export default function Users() {
 
           <Card className="premium-shadow border-border/60">
             <CardContent className="p-0">
+              <div className="divide-y divide-border/50 md:hidden">
+                {filteredUsers.map(u => <div key={u.id} className="flex min-w-0 items-center gap-3 p-3.5"><button type="button" onClick={() => handleEditUser(u)} className="flex min-w-0 flex-1 items-center gap-3 text-left"><div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl gradient-navy-light text-[10px] font-bold text-white">{(u.name || u.email || '?').split(' ').map((n: string) => n[0]).join('').slice(0, 2)}</div><div className="min-w-0 flex-1"><p className="truncate text-sm font-semibold">{u.name || 'Sem nome'}</p><p className="truncate text-[11px] text-muted-foreground">{u.email}</p><div className="mt-1 flex flex-wrap items-center gap-1.5"><Badge className={`text-[10px] font-semibold border rounded-full px-2 ${roleBadgeColors[u.role] || 'bg-muted text-muted-foreground border-border'}`}>{getRoleLabel(u.role, rolesData || [])}</Badge><StatusBadge status={u.status} /></div></div></button><DropdownMenu><DropdownMenuTrigger asChild><Button variant="ghost" size="sm" aria-label={`Ações de ${u.name || u.email}`} className="h-11 w-11 shrink-0 p-0"><MoreVertical className="h-4 w-4" /></Button></DropdownMenuTrigger><DropdownMenuContent align="end"><DropdownMenuItem onClick={() => handleEditUser(u)}><UserCog className="mr-2 h-4 w-4" />Editar</DropdownMenuItem><DropdownMenuItem className="text-destructive" onClick={() => handleDeleteUser(u)}><Trash2 className="mr-2 h-4 w-4" />Excluir</DropdownMenuItem></DropdownMenuContent></DropdownMenu></div>)}
+                {filteredUsers.length === 0 && <div className="p-8 text-center text-sm text-muted-foreground">Nenhum usuário encontrado.</div>}
+              </div>
+              <div className="hidden overflow-x-auto md:block">
               <Table>
                 <TableHeader>
                   <TableRow className="hover:bg-transparent border-border/60">
@@ -522,7 +527,7 @@ export default function Users() {
                   {filteredUsers.map(u => (
                     <TableRow key={u.id} className="cursor-pointer hover:bg-accent/30 transition-colors border-border/40" onClick={() => handleEditUser(u)}>
                       <TableCell>
-                        <div className="flex items-center gap-3">
+                        <div className="flex min-w-0 items-center gap-3">
                           <div className="h-9 w-9 rounded-xl gradient-navy-light flex items-center justify-center text-white text-[10px] font-bold">
                             {(u.name || u.email || '?').split(' ').map((n: string) => n[0]).join('').slice(0, 2)}
                           </div>
@@ -544,7 +549,7 @@ export default function Users() {
                       <TableCell className="text-xs text-muted-foreground">{u.last_access ? new Date(u.last_access).toLocaleDateString() : 'Nunca'}</TableCell>
                       <TableCell onClick={(e) => e.stopPropagation()}>
                         <DropdownMenu>
-                          <DropdownMenuTrigger asChild><Button variant="ghost" size="sm" className="h-8 w-8 p-0"><MoreVertical className="h-4 w-4" /></Button></DropdownMenuTrigger>
+                          <DropdownMenuTrigger asChild><Button variant="ghost" size="sm" className="h-11 w-11 p-0 sm:h-8 sm:w-8"><MoreVertical className="h-4 w-4" /></Button></DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
                             <DropdownMenuItem onClick={() => handleEditUser(u)}><UserCog className="mr-2 h-4 w-4" />Editar</DropdownMenuItem>
                             <DropdownMenuItem className="text-destructive" onClick={() => handleDeleteUser(u)}><Trash2 className="mr-2 h-4 w-4" />Excluir</DropdownMenuItem>
@@ -555,14 +560,15 @@ export default function Users() {
                   ))}
                 </TableBody>
               </Table>
+              </div>
             </CardContent>
           </Card>
         </TabsContent>
 
         {/* === EMPLOYEES TAB === */}
         <TabsContent value="employees" className="mt-6 space-y-4">
-          <div className="flex items-center justify-between">
-            <div className="relative w-72">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div className="relative w-full sm:w-72">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <Input placeholder="Buscar funcionário..." className="pl-9 h-9 text-sm" value={employeeSearchTerm} onChange={(e) => setEmployeeSearchTerm(e.target.value)} />
             </div>
@@ -570,6 +576,11 @@ export default function Users() {
 
           <Card className="premium-shadow border-border/60">
             <CardContent className="p-0">
+              <div className="divide-y divide-border/50 md:hidden">
+                {filteredEmployees.map(emp => <div key={emp.id} className="flex min-w-0 items-center gap-3 p-3.5"><button type="button" onClick={() => handleEditEmployee(emp)} className="flex min-w-0 flex-1 items-center gap-3 text-left"><div className="grid h-10 w-10 shrink-0 place-items-center rounded-xl gradient-navy-light text-[10px] font-bold text-white">{emp.name.split(' ').map((n: string) => n[0]).join('').slice(0, 2)}</div><div className="min-w-0 flex-1"><p className="truncate text-sm font-semibold">{emp.name}</p><p className="truncate text-[11px] text-muted-foreground">{emp.email}</p><div className="mt-1 flex flex-wrap items-center gap-1.5"><Badge className={`text-[10px] font-semibold border rounded-full px-2 ${roleBadgeColors[emp.role] || 'bg-muted text-muted-foreground border-border'}`}>{getRoleLabel(emp.role, rolesData || [])}</Badge><span className="text-[11px] text-muted-foreground">{emp.commission > 0 ? `${emp.commission}%` : '—'}</span><StatusBadge status={emp.status} /></div></div></button><DropdownMenu><DropdownMenuTrigger asChild><Button variant="ghost" size="sm" aria-label={`Ações de ${emp.name}`} className="h-11 w-11 shrink-0 p-0"><MoreVertical className="h-4 w-4" /></Button></DropdownMenuTrigger><DropdownMenuContent align="end"><DropdownMenuItem onClick={() => handleEditEmployee(emp)}><UserCog className="mr-2 h-4 w-4" />Editar</DropdownMenuItem><DropdownMenuItem className="text-destructive" onClick={() => handleDeleteEmployee(emp)}><Trash2 className="mr-2 h-4 w-4" />Excluir</DropdownMenuItem></DropdownMenuContent></DropdownMenu></div>)}
+                {filteredEmployees.length === 0 && <div className="p-8 text-center text-sm text-muted-foreground">Nenhum funcionário encontrado.</div>}
+              </div>
+              <div className="hidden overflow-x-auto md:block">
               <Table>
                 <TableHeader>
                   <TableRow className="hover:bg-transparent border-border/60">
@@ -584,7 +595,7 @@ export default function Users() {
                   {filteredEmployees.map(emp => (
                     <TableRow key={emp.id} className="cursor-pointer hover:bg-accent/30 transition-colors border-border/40" onClick={() => handleEditEmployee(emp)}>
                       <TableCell>
-                        <div className="flex items-center gap-3">
+                        <div className="flex min-w-0 items-center gap-3">
                           <div className="h-9 w-9 rounded-xl gradient-navy-light flex items-center justify-center text-white text-[10px] font-bold">
                             {emp.name.split(' ').map((n: string) => n[0]).join('').slice(0, 2)}
                           </div>
@@ -603,7 +614,7 @@ export default function Users() {
                       <TableCell><StatusBadge status={emp.status} /></TableCell>
                       <TableCell onClick={(e) => e.stopPropagation()}>
                         <DropdownMenu>
-                          <DropdownMenuTrigger asChild><Button variant="ghost" size="sm" className="h-8 w-8 p-0"><MoreVertical className="h-4 w-4" /></Button></DropdownMenuTrigger>
+                          <DropdownMenuTrigger asChild><Button variant="ghost" size="sm" className="h-11 w-11 p-0 sm:h-8 sm:w-8"><MoreVertical className="h-4 w-4" /></Button></DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
                             <DropdownMenuItem onClick={() => handleEditEmployee(emp)}><UserCog className="mr-2 h-4 w-4" />Editar</DropdownMenuItem>
                             <DropdownMenuItem className="text-destructive" onClick={() => handleDeleteEmployee(emp)}><Trash2 className="mr-2 h-4 w-4" />Excluir</DropdownMenuItem>
@@ -614,14 +625,15 @@ export default function Users() {
                   ))}
                 </TableBody>
               </Table>
+              </div>
             </CardContent>
           </Card>
         </TabsContent>
 
         {/* === PROFESSIONALS TAB === */}
         <TabsContent value="professionals" className="mt-6 space-y-4">
-          <div className="flex items-center justify-between">
-            <div className="relative w-72">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div className="relative w-full sm:w-72">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <Input placeholder="Buscar profissional..." className="pl-9 h-9 text-sm" value={professionalSearch} onChange={e => setProfessionalSearch(e.target.value)} />
             </div>
@@ -637,13 +649,13 @@ export default function Users() {
               {professionalsData.filter((p: any) => p.name?.toLowerCase().includes(professionalSearch.toLowerCase()) || p.specialty?.toLowerCase().includes(professionalSearch.toLowerCase())).map((p: any) => (
                 <Card key={p.id} className="premium-shadow border-border/60 hover:border-primary/40 transition-all cursor-pointer" onClick={() => handleEditProfessional(p)}>
                   <CardContent className="p-4">
-                    <div className="flex items-start justify-between mb-3">
-                      <div className="flex items-center gap-3">
+                    <div className="flex min-w-0 items-start justify-between gap-3 mb-3">
+                      <div className="flex min-w-0 items-center gap-3">
                         <div className="h-10 w-10 rounded-xl gradient-navy-light flex items-center justify-center text-white text-[11px] font-bold shrink-0">
                           {p.name.split(' ').map((n: string) => n[0]).join('').slice(0, 2).toUpperCase()}
                         </div>
-                        <div>
-                          <p className="text-sm font-bold leading-tight">{p.name}</p>
+                        <div className="min-w-0">
+                          <p className="break-words text-sm font-bold leading-tight">{p.name}</p>
                           <Badge className="mt-0.5 text-[9px] px-2 py-0 bg-cyan-50 text-cyan-700 border-cyan-200/60 border rounded-full">{p.specialty}</Badge>
                         </div>
                       </div>
@@ -661,7 +673,7 @@ export default function Users() {
                     <div className="flex justify-end mt-3">
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild onClick={e => e.stopPropagation()}>
-                          <Button variant="ghost" size="sm" className="h-7 w-7 p-0"><MoreVertical className="h-3.5 w-3.5" /></Button>
+                          <Button variant="ghost" size="sm" className="h-11 w-11 p-0 sm:h-8 sm:w-8"><MoreVertical className="h-3.5 w-3.5" /></Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
                           <DropdownMenuItem onClick={e => { e.stopPropagation(); handleEditProfessional(p); }}><UserCog className="mr-2 h-4 w-4" />Editar</DropdownMenuItem>
@@ -684,8 +696,8 @@ export default function Users() {
 
         {/* === ESTABLISHMENTS TAB === */}
         <TabsContent value="establishments" className="mt-6 space-y-4">
-          <div className="flex items-center justify-between">
-            <div className="relative w-72">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+            <div className="relative w-full sm:w-72">
               <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
               <Input placeholder="Buscar laboratorio..." className="pl-9 h-9 text-sm" value={laboratorySearch} onChange={e => setLaboratorySearch(e.target.value)} />
             </div>
@@ -701,13 +713,13 @@ export default function Users() {
               {laboratoriesData.filter((l: any) => l.name?.toLowerCase().includes(laboratorySearch.toLowerCase()) || l.city?.toLowerCase().includes(laboratorySearch.toLowerCase())).map((lab: any) => (
                 <Card key={lab.id} className="premium-shadow border-border/60 hover:border-primary/40 transition-all cursor-pointer" onClick={() => handleEditLaboratory(lab)}>
                   <CardContent className="p-4">
-                    <div className="flex items-start justify-between mb-3">
-                      <div className="flex items-center gap-3">
+                    <div className="flex min-w-0 items-start justify-between gap-3 mb-3">
+                      <div className="flex min-w-0 items-center gap-3">
                         <div className="h-10 w-10 rounded-xl bg-amber-50 border border-amber-200/60 flex items-center justify-center shrink-0">
                           <FlaskConical className="h-5 w-5 text-amber-600" />
                         </div>
-                        <div>
-                          <p className="text-sm font-bold leading-tight">{lab.name}</p>
+                        <div className="min-w-0">
+                          <p className="break-words text-sm font-bold leading-tight">{lab.name}</p>
                           {lab.trade_name && <p className="text-[10px] text-muted-foreground">{lab.trade_name}</p>}
                         </div>
                       </div>
@@ -730,7 +742,7 @@ export default function Users() {
                     <div className="flex justify-end mt-3">
                       <DropdownMenu>
                         <DropdownMenuTrigger asChild onClick={e => e.stopPropagation()}>
-                          <Button variant="ghost" size="sm" className="h-7 w-7 p-0"><MoreVertical className="h-3.5 w-3.5" /></Button>
+                          <Button variant="ghost" size="sm" className="h-11 w-11 p-0 sm:h-8 sm:w-8"><MoreVertical className="h-3.5 w-3.5" /></Button>
                         </DropdownMenuTrigger>
                         <DropdownMenuContent align="end">
                           <DropdownMenuItem onClick={e => { e.stopPropagation(); handleEditLaboratory(lab); }}><UserCog className="mr-2 h-4 w-4" />Editar</DropdownMenuItem>
@@ -753,9 +765,9 @@ export default function Users() {
 
         {/* === ROLES TAB === */}
         <TabsContent value="roles" className="mt-6 space-y-4">
-          <div className="flex items-center justify-between">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <p className="text-sm text-muted-foreground">Gerencie os perfis de acesso padrão do sistema.</p>
-            <Button size="sm" variant="outline" className="gap-2" onClick={() => { setEditingRole(null); setRoleModalOpen(true); }}>
+            <Button size="sm" variant="outline" className="w-full gap-2 sm:w-auto" onClick={() => { setEditingRole(null); setRoleModalOpen(true); }}>
               <Plus className="h-4 w-4" /> Novo Perfil
             </Button>
           </div>
@@ -793,7 +805,7 @@ export default function Users() {
         <TabsContent value="permissions" className="mt-6">
           <Card className="premium-shadow border-border/60">
             <CardHeader className="pb-3">
-              <div className="flex items-center justify-between">
+              <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
                 <div>
                   <CardTitle className="text-sm font-semibold font-heading">Matriz Global de Permissões</CardTitle>
                   <p className="text-[10px] text-muted-foreground mt-0.5">Visualize as permissões globais do sistema.</p>
@@ -827,7 +839,7 @@ export default function Users() {
             <DialogDescription>Profissionais podem ser vinculados a agendamentos e ordens de servico.</DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-2">
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div className="col-span-2 grid gap-2">
                 <Label className="text-xs font-semibold">Nome completo *</Label>
                 <Input value={newProfessionalData.name} onChange={e => setNewProfessionalData(p => ({ ...p, name: e.target.value }))} placeholder="Nome do profissional" />
@@ -914,7 +926,7 @@ export default function Users() {
             <DialogDescription>Laboratorios recebem OS de lentes e exames dos pacientes.</DialogDescription>
           </DialogHeader>
           <div className="grid gap-4 py-2">
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div className="col-span-2 grid gap-2">
                 <Label className="text-xs font-semibold">Razao Social *</Label>
                 <Input value={newLaboratoryData.name} onChange={e => setNewLaboratoryData(p => ({ ...p, name: e.target.value }))} placeholder="Nome do laboratorio" />
@@ -1013,7 +1025,7 @@ export default function Users() {
               <Label className="text-xs font-semibold">Senha {editingUser && '(deixe em branco para manter)'}</Label>
               <Input id="new-user-password" name="new-user-password" type="password" autoComplete="new-password" value={newUserData.password} onChange={(e) => setNewUserData({ ...newUserData, password: e.target.value })} placeholder={editingUser ? 'Digite para alterar' : 'Mínimo 6 caracteres'} />
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div className="grid gap-2">
                 <Label className="text-xs font-semibold">Perfil</Label>
                 <Select onValueChange={(v) => {
@@ -1052,7 +1064,7 @@ export default function Users() {
                       }} />
                       <Label className="text-xs font-bold">{c.trade_name || c.name}</Label>
                     </div>
-                    <div className="grid grid-cols-2 gap-2 pl-6">
+                    <div className="grid grid-cols-1 gap-2 pl-6 sm:grid-cols-2">
                       {stores.filter(s => s.company_id === c.id).map(s => (
                         <div key={s.id} className="flex items-center gap-2">
                           <Checkbox checked={newUserData.stores.includes(s.id)} onCheckedChange={(checked) => {
@@ -1087,19 +1099,19 @@ export default function Users() {
 
       {/* EMPLOYEE MODAL */}
       <Dialog open={employeeModalOpen} onOpenChange={setEmployeeModalOpen}>
-        <DialogContent className="sm:max-w-lg">
+        <DialogContent className="max-h-[calc(100dvh-1rem)] w-[calc(100vw-1rem)] overflow-y-auto rounded-2xl sm:max-w-lg">
           <DialogHeader><DialogTitle>{editingEmployee ? 'Editar' : 'Novo'} Funcionário</DialogTitle></DialogHeader>
           <div className="grid gap-4 py-2">
             <div className="grid gap-2"><Label className="text-xs font-semibold">Nome completo</Label><Input value={newEmployeeData.name} onChange={(e) => setNewEmployeeData({ ...newEmployeeData, name: e.target.value })} /></div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div className="grid gap-2"><Label className="text-xs font-semibold">E-mail</Label><Input type="email" value={newEmployeeData.email} onChange={(e) => setNewEmployeeData({ ...newEmployeeData, email: e.target.value })} /></div>
               <div className="grid gap-2"><Label className="text-xs font-semibold">Telefone</Label><Input value={newEmployeeData.phone} onChange={(e) => setNewEmployeeData({ ...newEmployeeData, phone: e.target.value })} /></div>
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div className="grid gap-2"><Label className="text-xs font-semibold">CPF</Label><Input value={newEmployeeData.cpf} onChange={(e) => setNewEmployeeData({ ...newEmployeeData, cpf: formatCPF(e.target.value) })} placeholder="000.000.000-00" maxLength={14} /></div>
               <div className="grid gap-2"><Label className="text-xs font-semibold">Data de Admissão</Label><Input type="date" value={newEmployeeData.hire_date} onChange={(e) => setNewEmployeeData({ ...newEmployeeData, hire_date: e.target.value })} /></div>
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div className="grid gap-2"><Label className="text-xs font-semibold">Cargo</Label>
                 <Select onValueChange={(v) => setNewEmployeeData({ ...newEmployeeData, role: v })} value={newEmployeeData.role}>
                   <SelectTrigger><SelectValue placeholder="Selecione" /></SelectTrigger>
@@ -1113,7 +1125,7 @@ export default function Users() {
                 </Select>
               </div>
             </div>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
               <div className="grid gap-2"><Label className="text-xs font-semibold">Empresa</Label>
                 <Select onValueChange={(v) => setNewEmployeeData({ ...newEmployeeData, company_id: v, store_id: '' })} value={newEmployeeData.company_id}>
                   <SelectTrigger><SelectValue placeholder="Selecione" /></SelectTrigger>

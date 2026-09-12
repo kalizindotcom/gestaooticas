@@ -34,7 +34,7 @@ export function CompanyDetailModal({ open, onOpenChange, company, stores, onEdit
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[560px] max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-h-[calc(100dvh-1rem)] w-[calc(100vw-1rem)] overflow-y-auto rounded-2xl sm:max-w-[560px]">
         <DialogHeader>
           <DialogTitle className="font-heading text-lg flex items-center gap-3">
             <div className="h-10 w-10 rounded-xl bg-primary/10 text-primary flex items-center justify-center">

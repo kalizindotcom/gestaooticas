@@ -70,7 +70,7 @@ export function CompanyFormModal({ open, onOpenChange, company, onSave, isLoadin
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-[640px]">
+      <DialogContent className="max-h-[calc(100dvh-1rem)] w-[calc(100vw-1rem)] overflow-y-auto rounded-2xl sm:max-w-[640px]">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Building2 className="h-5 w-5" />
@@ -159,9 +159,9 @@ export function CompanyFormModal({ open, onOpenChange, company, onSave, isLoadin
           </div>
         </div>
 
-        <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)}>Cancelar</Button>
-          <Button onClick={handleSubmit} disabled={isLoading}>
+        <DialogFooter className="flex-col gap-2 sm:flex-row">
+          <Button variant="outline" onClick={() => onOpenChange(false)} className="min-h-11 w-full sm:w-auto">Cancelar</Button>
+          <Button onClick={handleSubmit} disabled={isLoading} className="min-h-11 w-full sm:w-auto">
             {isLoading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Check className="h-4 w-4 mr-2" />}
             {isEdit ? 'Salvar Alterações' : 'Cadastrar'}
           </Button>
