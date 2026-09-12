@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(dir C:Usersh2kDocumentsprojetosotica_nordestina-main *)",
+      "Bash(npm run *)"
+    ]
+  }
+}
