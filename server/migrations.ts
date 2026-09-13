@@ -204,7 +204,7 @@ export const migrations: readonly Migration[] = [
 ];
 
 function quoteIdentifier(value: string) {
-  return `"${value.replaceAll('"', '""')}"`;
+  return `"${value.replace(/"/g, '""')}"`;
 }
 
 function migrationError(message: string, code: string) {
