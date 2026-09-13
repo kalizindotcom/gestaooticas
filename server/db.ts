@@ -495,6 +495,7 @@ export async function initDatabase() {
   await seedDefaultAdmin();
   if (pendingRestore) {
     execute('INSERT OR REPLACE INTO app_meta (key, value, updated_at) VALUES (?, ?, ?)', ['last_restore_completed', JSON.stringify(pendingRestore), now()]);
+    execute('UPDATE backup_jobs SET status = ?, completed_at = ? WHERE id = ?', ['restored', now(), pendingRestore.job_id]);
   }
   execute('INSERT OR REPLACE INTO app_meta (key, value, updated_at) VALUES (?, ?, ?)', ['schema_version', SCHEMA_VERSION, now()]);
   persistDatabase();
@@ -601,6 +602,17 @@ function seedPermissions() {
 export function getDatabase() {
   if (!database) throw new Error('Banco local ainda não foi inicializado.');
   return database;
+}
+
+export function getLastRestoreCompleted(): Record<string, unknown> | null {
+  const row = selectRows('SELECT value FROM app_meta WHERE key = ? LIMIT 1', ['last_restore_completed'])[0];
+  if (!row?.value) return null;
+  try {
+    const parsed = JSON.parse(String(row.value));
+    return parsed && typeof parsed === 'object' ? parsed as Record<string, unknown> : null;
+  } catch {
+    return null;
+  }
 }
 
 export function getDatabasePath() {

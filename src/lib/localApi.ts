@@ -389,7 +389,7 @@ const auth = {
 const storage = {
   from(bucket: string) {
     return {
-      async list(path: string, options: { limit?: number } = {}) {
+      async list(path: string, options: { limit?: number; sortBy?: { column: string; order: 'asc' | 'desc' } } = {}) {
         const params = new URLSearchParams({ path, limit: String(options.limit || 100) });
         return request<Array<Record<string, unknown>>>(`/storage/${encodeURIComponent(bucket)}/list?${params}`);
       },
@@ -572,6 +572,9 @@ const backupAdmin = {
   },
   async runIntegrityCheck() {
     return request<Record<string, any>>('/admin/integrity/check', { method: 'POST', body: JSON.stringify({}) });
+  },
+  async metrics() {
+    return request<Record<string, any>>('/admin/metrics');
   },
   async run(label = 'manual', sendToDrive = false) {
     return request<Record<string, any>>('/admin/backups/run', { method: 'POST', body: JSON.stringify({ label, send_to_drive: sendToDrive }) });

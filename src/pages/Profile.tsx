@@ -40,7 +40,7 @@ export default function Profile() {
   const handleSave = async () => {
     if (!user?.id || !name.trim()) return toast.error('Informe seu nome completo.');
     setSaving(true);
-    const result = await localApi.admin.updateUser(String(user.id), { name: name.trim(), email: user.email });
+    const result = await localApi.auth.admin.updateUser(String(user.id), { name: name.trim(), email: user.email });
     setSaving(false);
     if (result.error) return toast.error(result.error.message || 'Não foi possível salvar seu perfil.');
     toast.success('Perfil atualizado com sucesso.');

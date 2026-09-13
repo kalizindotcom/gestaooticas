@@ -9,6 +9,7 @@ const root = path.resolve(new URL('..', import.meta.url).pathname);
 const dataDirectory = await mkdtemp(path.join(tmpdir(), 'otica-ci-smoke-'));
 let child;
 let baseUrl;
+let accessToken;
 let output = '';
 
 function freePort() {
@@ -24,9 +25,11 @@ function freePort() {
 }
 
 async function request(pathname, options = {}) {
+  const headers = new Headers(options.body === undefined ? {} : { 'content-type': 'application/json' });
+  if (accessToken) headers.set('authorization', `Bearer ${accessToken}`);
   const response = await fetch(`${baseUrl}${pathname}`, {
     method: options.method || 'GET',
-    headers: options.body === undefined ? {} : { 'content-type': 'application/json' },
+    headers,
     body: options.body === undefined ? undefined : JSON.stringify(options.body),
   });
   const body = await response.json();
@@ -88,6 +91,7 @@ try {
   await waitForHealth();
   const health = await request('/api/health');
   assert.equal(health.response.status, 200);
+  assert.match(health.response.headers.get('x-request-id') || '', /^[a-zA-Z0-9._:-]{8,100}$/);
   assert.equal(health.body.ok, true);
   assert.equal(health.body.database, 'sqlite');
 
@@ -99,7 +103,12 @@ try {
     body: { email: adminEmail, password: adminPassword },
   });
   assert.equal(login.response.status, 200);
-  assert.ok(login.body?.data?.access_token);
+  accessToken = login.body?.data?.access_token;
+  assert.ok(accessToken);
+
+  const metrics = await request('/api/admin/metrics');
+  assert.equal(metrics.response.status, 200);
+  assert.ok(metrics.body?.data?.requests?.total >= 4);
 
   console.log('Smoke API OK: health, banco, autenticação e autorização.');
 } catch (error) {

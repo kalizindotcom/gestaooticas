@@ -18,6 +18,7 @@ import {
 } from './db.js';
 import { authSecret } from './securityConfig.js';
 import { analyzeDataIntegrity, type IntegrityReport } from './dataIntegrity.js';
+import { logOperationalError } from './observability.js';
 
 const execFileAsync = promisify(execFile);
 const require = createRequire(import.meta.url);
@@ -568,6 +569,28 @@ export function listBackupJobs(filters: { status?: string; limit?: number; offse
   return { rows, total };
 }
 
+export function getBackupOperationalStatus() {
+  const settings = getBackupSettings();
+  const latest = listBackupJobs({ status: 'all', limit: 1 }).rows[0];
+  return {
+    enabled: settings.enabled,
+    scheduler: {
+      last_tick_at: settings.last_scheduler_tick,
+      timezone: settings.timezone,
+      schedule_hour: settings.schedule_hour,
+      schedule_minute: settings.schedule_minute,
+    },
+    latest_job: latest ? {
+      id: latest.id,
+      status: latest.status,
+      source: latest.source,
+      created_at: latest.created_at,
+      completed_at: latest.completed_at,
+      size_bytes: latest.size_bytes,
+    } : null,
+  };
+}
+
 export function getBackupJob(id: string) {
   return selectRows('SELECT * FROM backup_jobs WHERE id = ? LIMIT 1', [id])[0];
 }
@@ -630,7 +653,7 @@ export async function restoreBackup(jobId: string, confirmation: string) {
   const job = getBackupJob(jobId);
   if (!job?.local_path) throw new Error('Este backup não possui uma cópia local disponível.');
   const archivePath = String(job.local_path);
-  await inspectArchive(archivePath);
+  const inspected = await inspectArchive(archivePath);
   const preRestore = await createBackup({ type: 'pre_restore', label: `pre-restore-${jobId}` });
   const stage = path.join(backupRoot, `.restore-${jobId}-${Date.now()}`);
   await fsp.rm(stage, { recursive: true, force: true });
@@ -717,7 +740,7 @@ export async function runBackupScheduler(redirectUri?: string) {
 }
 
 export function startBackupScheduler(redirectUri?: string) {
-  const timer = setInterval(() => { runBackupScheduler(redirectUri).catch((error) => console.error('[backup-scheduler]', error)); }, 60_000);
+  const timer = setInterval(() => { runBackupScheduler(redirectUri).catch((error) => logOperationalError('backup_scheduler_failed', error)); }, 60_000);
   timer.unref?.();
   return timer;
 }

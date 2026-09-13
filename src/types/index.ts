@@ -38,6 +38,8 @@ export interface FinancialEntry {
   reversed_entry_id?: string;
   reversal_reason?: string;
   recurrence_source_id?: string;
+  is_recurring?: boolean;
+  recurrence_config?: Record<string, unknown> | null;
   status: 'paid' | 'partially_paid' | 'pending' | 'overdue' | 'cancelled';
   category_id?: string;
   category?: string; // categoria textual (usada pelo DRE como fallback)

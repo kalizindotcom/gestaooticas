@@ -254,7 +254,7 @@ export const useProducts = () => {
 
 export const useProductsPage = (page: number, pageSize = 30, search = '') => {
   const { selectedCompanyId } = useGlobalFilter();
-  return useQuery({
+  return useQuery<{ rows: any[]; total: number }>({
     queryKey: ['products-page', selectedCompanyId, page, pageSize, search],
     queryFn: async () => {
       let query = localApi.from('products').select('*, product_stock(*), product_images(*)').eq('company_id', selectedCompanyId!).eq('status', 'active').order('name').limit(pageSize).offset(page * pageSize);
@@ -264,7 +264,6 @@ export const useProductsPage = (page: number, pageSize = 30, search = '') => {
       return { rows: data || [], total: meta?.total || 0 };
     },
     enabled: !!selectedCompanyId,
-    keepPreviousData: true,
   });
 };
 

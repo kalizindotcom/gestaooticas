@@ -1,0 +1,36 @@
+name: Production Health
+
+on:
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+    inputs:
+      health_url:
+        description: 'URL pública do healthcheck'
+        required: false
+        default: 'https://gestaooticas.online/api/health'
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-health
+  cancel-in-progress: true
+
+jobs:
+  health:
+    name: Public API healthcheck
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+      - name: Check production health
+        env:
+          HEALTH_URL: ${{ inputs.health_url || 'https://gestaooticas.online/api/health' }}
+        run: node scripts/check-health.mjs

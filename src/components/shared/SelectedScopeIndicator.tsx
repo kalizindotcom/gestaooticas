@@ -16,7 +16,7 @@ export function SelectedScopeIndicator() {
   const { selectedCompanyId, selectedStoreIds, companies, stores, setSelectedStoreIds } = useGlobalFilter();
   const selectedCompany = companies.find((company) => company.id === selectedCompanyId);
   const scopedStores = selectedCompanyId
-    ? stores.filter((store) => String(store.company_id || store.companyId || '') === String(selectedCompanyId))
+    ? stores.filter((store) => String(store.company_id || '') === String(selectedCompanyId))
     : stores;
   const validSelectedStoreIds = selectedStoreIds.filter((storeId) => scopedStores.some((store) => String(store.id) === String(storeId)));
   const selectedStore = validSelectedStoreIds.length === 1
@@ -71,7 +71,7 @@ export function StoreSelectionGate({ children }: { children: React.ReactNode }) 
   const { pathname } = useLocation();
   const navigate = useNavigate();
   const scopedStores = selectedCompanyId
-    ? stores.filter((store) => String(store.company_id || store.companyId || '') === String(selectedCompanyId))
+    ? stores.filter((store) => String(store.company_id || '') === String(selectedCompanyId))
     : stores;
   const validSelectedStoreIds = selectedStoreIds.filter((storeId) => scopedStores.some((store) => String(store.id) === String(storeId)));
 

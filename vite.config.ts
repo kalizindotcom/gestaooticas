@@ -17,10 +17,7 @@ export default defineConfig(({ mode }) => ({
     },
   },
   plugins: [
-    react({
-      // Desabilita Fast Refresh automático
-      fastRefresh: false,
-    }),
+    react(),
     mode === "development" && componentTagger()
   ].filter(Boolean),
   resolve: {

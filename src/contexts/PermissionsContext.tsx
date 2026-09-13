@@ -15,14 +15,14 @@ const PermissionsContext = createContext<PermissionsContextType | undefined>(und
 const EMPTY_PERMISSIONS: GlobalPermissions = {
   dashboard: {}, appointments: {}, customers: {}, products: {}, sales: {},
   service_orders: {}, financial: {}, reports: {}, users: {}, settings: {},
-  companies: {}, stores: {}, admin_center: {},
+  companies: {}, stores: {}, admin_center: {}, fiscal: {},
 };
 
 function buildPermissions(rows: Array<{ module: string; action: string }>): GlobalPermissions {
   const result: GlobalPermissions = {
     dashboard: {}, appointments: {}, customers: {}, products: {}, sales: {},
     service_orders: {}, financial: {}, reports: {}, users: {}, settings: {},
-    companies: {}, stores: {}, admin_center: {},
+    companies: {}, stores: {}, admin_center: {}, fiscal: {},
   };
   for (const row of rows) {
     if (!(row.module in result)) continue;

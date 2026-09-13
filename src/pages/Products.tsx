@@ -1,4 +1,5 @@
 import { useMemo, useRef, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import {
   Plus,
   Search,
@@ -95,6 +96,7 @@ import { FinancialInfoTip } from '@/components/financial/FinancialInfoTip';
 import { SalesHistoryPanel } from '@/components/products/SalesHistoryPanel';
 
 export default function Products() {
+  const queryClient = useQueryClient();
   const { data: products = [], isLoading } = useProducts();
   const { data: productMovements = [] } = useProductMovements();
   const { data: sales = [] } = useSales();
@@ -254,7 +256,7 @@ export default function Products() {
     sales: new Set(filteredSaleHistoryRows.map((row: any) => row.saleId)).size,
     units: filteredSaleHistoryRows.reduce((total: number, row: any) => total + row.quantity, 0),
     revenue: filteredSaleHistoryRows.reduce((total: number, row: any) => total + row.itemTotal, 0),
-    discounts: Array.from(new Map(filteredSaleHistoryRows.map((row: any) => [row.saleId, row.discount])).values()).reduce((total, value) => total + Number(value || 0), 0),
+    discounts: Array.from(new Map(filteredSaleHistoryRows.map((row: any) => [row.saleId, row.discount])).values()).reduce<number>((total, value: unknown) => total + Number(value || 0), 0),
   }), [filteredSaleHistoryRows]);
 
   const copyProductValue = async (label: string, value?: string | null) => {

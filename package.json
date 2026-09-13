@@ -14,11 +14,13 @@
     "lint:ci": "eslint server src/test src/lib/*.test.ts",
     "preview": "vite preview",
     "smoke:api": "node scripts/smoke-api.mjs",
+    "smoke:continuity": "node scripts/smoke-continuity.mjs",
+    "health:production": "node scripts/check-health.mjs",
     "test": "vitest run",
     "test:report-scope": "vitest run src/lib/reportScope.test.ts",
     "test:watch": "vitest",
     "typecheck": "tsc -b --pretty false",
-    "typecheck:ci": "tsc --noEmit --target ES2022 --module NodeNext --moduleResolution NodeNext --skipLibCheck --strict false server/db.ts server/dataIntegrity.ts server/fiscalDomain.ts server/fiscalProvider.ts server/securityConfig.ts"
+    "typecheck:ci": "tsc --noEmit --target ES2022 --module NodeNext --moduleResolution NodeNext --skipLibCheck --strict false server/index.ts server/db.ts server/backupService.ts server/migrations.ts server/dataIntegrity.ts server/fiscalDomain.ts server/fiscalProvider.ts server/securityConfig.ts server/observability.ts"
   },
   "dependencies": {
     "@hookform/resolvers": "^3.10.0",

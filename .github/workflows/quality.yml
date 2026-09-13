@@ -35,6 +35,9 @@ jobs:
       - name: Backend typecheck
         run: npm run typecheck:ci
 
+      - name: Full application typecheck
+        run: npm run typecheck
+
       - name: Backend and test lint
         run: npm run lint:ci
 
@@ -47,6 +50,5 @@ jobs:
       - name: API smoke test
         run: npm run smoke:api
 
-      - name: Full application typecheck diagnostic
-        run: npm run typecheck
-        continue-on-error: true
+      - name: Continuity smoke test
+        run: npm run smoke:continuity

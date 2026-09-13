@@ -145,7 +145,7 @@ export default function Customers() {
   const pageStart = filtered.length === 0 ? 0 : (currentPage - 1) * CUSTOMERS_PAGE_SIZE + 1;
   const pageEnd = Math.min(currentPage * CUSTOMERS_PAGE_SIZE, filtered.length);
 
-  const allTags = Array.from(new Set(customers.flatMap(c => visibleCustomerTags(c.tags || []))));
+  const allTags: string[] = Array.from(new Set<string>(customers.flatMap((c: any) => visibleCustomerTags(c.tags || []))));
   const birthdaysThisMonth = customers.filter(c => {
     if (!c.birth_date) return false;
     const date = new Date(`${c.birth_date}T00:00:00`);

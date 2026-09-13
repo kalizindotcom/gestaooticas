@@ -8,6 +8,7 @@ import {
   isCompletedSale,
   isRecordInStoreScope,
 } from './reportScope';
+import type { StoreScopedRecord } from './reportScope';
 
 const STORE_A = 'store-a';
 const STORE_B = 'store-b';
@@ -59,7 +60,7 @@ const storeOptions = [
   { id: STORE_C, name: 'Loja C' },
 ];
 
-const reportSources = [
+const reportSources: Array<[string, StoreScopedRecord[]]> = [
   ['vendas', sales],
   ['ordens de serviço', serviceOrders],
   ['agendamentos', appointments],

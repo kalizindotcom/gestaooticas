@@ -11,6 +11,7 @@ import { fileURLToPath } from 'node:url';
 import {
   execute,
   getDatabase,
+  getLastRestoreCompleted,
   initDatabase,
   newId,
   now,
@@ -33,6 +34,7 @@ import {
   getBackupArchivePath,
   getBackupJob,
   getBackupSettings,
+  getBackupOperationalStatus,
   getGoogleDriveConfigStatus,
   importBackupArchive,
   inspectArchive,
@@ -62,6 +64,7 @@ import {
   isProduction,
   sessionTtlSeconds,
 } from './securityConfig.js';
+import { beginRequest, createRequestId, getOperationalMetrics, logOperationalError, logOperationalEvent, recordRequest } from './observability.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -168,6 +171,7 @@ const allowedTables = new Set([
 interface AuthenticatedRequest extends Request {
   userId?: string;
   profile?: Record<string, unknown>;
+  requestId?: string;
 }
 
 interface QueryFilters {
@@ -182,6 +186,15 @@ interface QueryFilters {
 const app = express();
 app.disable('x-powered-by');
 app.use(cors({ origin: (origin, callback) => callback(null, configuredCorsOrigin(origin)), credentials: true }));
+app.use((request, response, next) => {
+  const requestId = createRequestId(request.headers['x-request-id']);
+  const started = Date.now();
+  (request as AuthenticatedRequest).requestId = requestId;
+  response.setHeader('X-Request-ID', requestId);
+  beginRequest();
+  response.on('finish', () => recordRequest(request.method, response.statusCode, Date.now() - started));
+  next();
+});
 app.use((_request, response, next) => {
   response.setHeader('X-Content-Type-Options', 'nosniff');
   response.setHeader('X-Frame-Options', 'DENY');
@@ -230,9 +243,11 @@ function clearSessionCookie(response: Response) {
   response.setHeader('Set-Cookie', `otica_session=; HttpOnly; Path=/; Max-Age=0; SameSite=Lax${secure}`);
 }
 
-const healthResponse = { ok: true, database: 'sqlite' } as const;
-app.get('/health', (_request, response) => response.json(healthResponse));
-app.get('/api/health', (_request, response) => response.json(healthResponse));
+function healthPayload() {
+  return { ok: true, database: 'sqlite', service: 'gestao-oticas-api' };
+}
+app.get('/health', (_request, response) => response.json(healthPayload()));
+app.get('/api/health', (_request, response) => response.json(healthPayload()));
 
 function readQueryValue(value: unknown) {
   if (Array.isArray(value)) return String(value[0] ?? '');
@@ -1071,6 +1086,10 @@ app.get('/api/admin/database/migrations', requireAuth, (request: AuthenticatedRe
   if (!requireBackupMaster(request, response)) return;
   return response.json({ data: getMigrationStatus(getDatabase()), error: null });
 });
+app.get('/api/admin/metrics', requireAuth, (request: AuthenticatedRequest, response: Response) => {
+  if (!requireBackupMaster(request, response)) return;
+  return response.json({ data: { ...getOperationalMetrics(), backups: getBackupOperationalStatus(), last_restore_completed: getLastRestoreCompleted() }, error: null });
+});
 app.get('/api/admin/integrity/history', requireAuth, (request: AuthenticatedRequest, response: Response) => {
   if (!requireBackupMaster(request, response)) return;
   return response.json({ data: listDataIntegrityChecks(Number(request.query.limit || 20)), error: null });
@@ -1213,7 +1232,7 @@ app.get('/api/auth/permissions', requireAuth, (request: AuthenticatedRequest, re
 });
 
 function canManageUsers(request: AuthenticatedRequest, operation: 'create' | 'edit' | 'delete') {
-  return isMaster(request.profile) || hasPermission(request.profile, 'users', operation);
+  return isMaster(request.profile) || hasModulePermission(request.profile, 'users', operation);
 }
 
 function canViewRoles(request: AuthenticatedRequest) {
@@ -2164,7 +2183,7 @@ app.post('/api/operations/financial/manual-entry', requireAuth, (request: Authen
     const id = String(input.id || newId());
     const createdAt = String(input.created_at || now());
     const responsibleName = String(request.profile?.name || request.profile?.email || 'Usuário atual');
-    const row = { ...input, id, created_at: createdAt, amount: Number(amount.toFixed(2)), origin_table: 'manual', created_by: request.userId, created_by_name: responsibleName, updated_by: request.userId, updated_by_name: responsibleName, audit_log: { ...(parseAuditLog(input.audit_log) || {}), created_by: request.userId || null, created_by_name: responsibleName, created_at: createdAt, changes: Array.isArray(parseAuditLog(input.audit_log)?.changes) ? parseAuditLog(input.audit_log)?.changes : [] } };
+    const row: Record<string, unknown> = { ...input, id, created_at: createdAt, amount: Number(amount.toFixed(2)), origin_table: 'manual', created_by: request.userId, created_by_name: responsibleName, updated_by: request.userId, updated_by_name: responsibleName, audit_log: { ...(parseAuditLog(input.audit_log) || {}), created_by: request.userId || null, created_by_name: responsibleName, created_at: createdAt, changes: Array.isArray(parseAuditLog(input.audit_log)?.changes) ? parseAuditLog(input.audit_log)?.changes : [] } };
     const columns = tableColumns('financial_entries');
     const validEntries = Object.entries(row).filter(([key]) => columns.has(key));
     getDatabase().run('BEGIN');
@@ -3395,7 +3414,7 @@ app.delete('/api/storage/:bucket', (request, response) => {
 });
 
 app.post('/api/functions/generate-insights', requireAuth, (request: AuthenticatedRequest, response) => {
-  if (!isMaster(request.profile) && !hasPermission(request.profile, 'dashboard', 'generate_insights')) {
+  if (!isMaster(request.profile) && !hasModulePermission(request.profile, 'dashboard', 'generate_insights')) {
     return response.status(403).json({ data: null, error: { message: 'Permissão insuficiente.' } });
   }
   const stats = request.body?.stats || {};
@@ -3414,9 +3433,11 @@ if (process.env.NODE_ENV === 'production') {
   app.get(/.*/, (_request, response) => response.sendFile(path.join(staticDirectory, 'index.html')));
 }
 
-app.use((error: unknown, _request: Request, response: Response, _next: NextFunction) => {
+app.use((error: unknown, request: Request, response: Response, _next: NextFunction) => {
   const typedError = error as { code?: string; statusCode?: number };
   const statusCode = typedError.code === 'LIMIT_FILE_SIZE' ? 413 : Number(typedError.statusCode || 400);
+  logOperationalError('request_error', error, { request_id: (request as AuthenticatedRequest).requestId, method: request.method, path: request.path, status_code: statusCode });
+  response.setHeader('X-Request-ID', (request as AuthenticatedRequest).requestId || createRequestId());
   response.status(statusCode).json({ data: null, error: errorPayload(error) });
 });
 
@@ -3424,11 +3445,11 @@ if (process.env.OTICA_DISABLE_LISTEN !== 'true') {
   initDatabase().then(() => {
     if (process.env.OTICA_DISABLE_SCHEDULER !== 'true') {
       startBackupScheduler();
-      runBackupScheduler().catch((error) => console.error('[backup-scheduler:first-run]', error));
+      runBackupScheduler().catch((error) => logOperationalError('backup_scheduler_first_run_failed', error));
     }
-    app.listen(port, '0.0.0.0', () => console.log(`Servidor local em http://localhost:${port}`));
+    app.listen(port, '0.0.0.0', () => logOperationalEvent('server_ready', { port, environment: process.env.NODE_ENV || 'development' }));
   }).catch((error) => {
-    console.error('Falha ao iniciar o banco local:', error);
+    logOperationalError('database_boot_failed', error);
     process.exitCode = 1;
   });
 }

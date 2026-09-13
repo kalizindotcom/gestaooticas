@@ -15,7 +15,19 @@ import {
   PopoverContent,
   PopoverTrigger,
 } from "@/components/ui/popover"
-import { Customer } from "@/data/mockData"
+type Customer = {
+  id: string
+  name?: string
+  nickname?: string
+  legalName?: string
+  customerType?: 'individual' | 'company'
+  cpf?: string
+  cnpj?: string
+  phone?: string
+  whatsapp?: string
+  emails?: Array<{ value?: string }>
+  phones?: Array<{ value?: string }>
+}
 
 interface CustomerSelectorProps {
   customers: Customer[]

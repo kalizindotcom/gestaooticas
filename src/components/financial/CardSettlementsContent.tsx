@@ -51,7 +51,7 @@ export function CardSettlementsContent() {
       queryClient.invalidateQueries({ queryKey: ['financial-card-settlements'], refetchType: 'all' });
       queryClient.invalidateQueries({ queryKey: ['financial-entries'], refetchType: 'all' });
       queryClient.invalidateQueries({ queryKey: ['bank-transactions'], refetchType: 'all' });
-      toast.success(`Parcela conciliada. Diferença: ${money(result.data?.difference || 0)}.`);
+      toast.success(`Parcela conciliada. Diferença: ${money(result?.difference || 0)}.`);
       setSelectedId('');
       setActualAmount('');
     },

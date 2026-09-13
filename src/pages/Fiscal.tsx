@@ -328,7 +328,7 @@ export default function Fiscal() {
         </div>
       </div>
 
-      <FinancialInfoTip title="Como usar a Gestão Fiscal" description="Crie rascunhos, revise os dados e configure o escopo de empresa e loja. Nesta etapa local, o envio fica limitado à simulação persistida; nenhum documento é transmitido a órgãos fiscais." />
+      <FinancialInfoTip title="Como usar a Gestão Fiscal">Crie rascunhos, revise os dados e configure o escopo de empresa e loja. Nesta etapa local, o envio fica limitado à simulação persistida; nenhum documento é transmitido a órgãos fiscais.</FinancialInfoTip>
 
       {!selectedCompanyId || !singleStoreId ? <div className="rounded-xl border border-amber-300/70 bg-amber-50/70 px-4 py-3 text-sm text-amber-800 dark:border-amber-900/70 dark:bg-amber-950/20 dark:text-amber-200">Selecione uma empresa e uma única loja no filtro global para criar documentos e editar a configuração fiscal. A listagem pode ser consultada por empresa quando houver uma loja diferente selecionada.</div> : null}
 

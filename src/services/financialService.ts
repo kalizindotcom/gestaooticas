@@ -7,6 +7,7 @@ export interface CashRegister {
   company_id: string;
   store_id: string;
   user_id: string;
+  user_name?: string;
   opened_by_name?: string;
   opened_at: string;
   closed_at?: string;
@@ -213,7 +214,7 @@ export class FinancialService {
     if (entry.origin_table === 'manual') {
       const { data, error } = await localApi.operations.createManualFinancialEntry(payload as Record<string, unknown>);
       if (error) throw error;
-      return data as FinancialEntry;
+      return data as unknown as FinancialEntry;
     }
     const { data, error } = await localApi
       .from('financial_entries')
@@ -357,7 +358,7 @@ export class FinancialService {
       discount_amount: adjustments?.discount_amount,
     });
     if (error) throw error;
-    return data as FinancialEntry;
+    return data as unknown as FinancialEntry;
   }
 
   static async getEntryAudits(entryId: string): Promise<Array<Record<string, unknown>>> {
@@ -386,7 +387,7 @@ export class FinancialService {
       notes: data.notes,
     });
     if (error) throw error;
-    return cashRegister as CashRegister;
+    return cashRegister as unknown as CashRegister;
   }
 
   static async closeCashRegister(
@@ -400,7 +401,7 @@ export class FinancialService {
       notes,
     });
     if (error) throw error;
-    return data as CashRegister;
+    return data as unknown as CashRegister;
   }
 
   static async createCashMovement(movement: Partial<CashRegisterMovement>): Promise<CashRegisterMovement> {
@@ -412,10 +413,10 @@ export class FinancialService {
       description: movement.description,
       payment_method: movement.payment_method,
       reference_id: movement.reference_id,
-      reference_table: movement.reference_table,
+      reference_table: movement.reference_table as 'sales' | 'service_orders' | undefined,
     });
     if (error) throw error;
-    return data as CashRegisterMovement;
+    return data as unknown as CashRegisterMovement;
   }
 
   static async getCashRegisters(filters?: {
@@ -461,11 +462,11 @@ export class FinancialService {
 
     if (error) throw error;
 
-    const movsByRegister = (movements || []).reduce<Record<string, CashRegisterMovement[]>>((acc, m) => {
-      if (!acc[m.cash_register_id]) acc[m.cash_register_id] = [];
-      acc[m.cash_register_id].push(m);
-      return acc;
-    }, {});
+    const movsByRegister: Record<string, CashRegisterMovement[]> = {};
+    for (const movement of (movements || []) as CashRegisterMovement[]) {
+      if (!movsByRegister[movement.cash_register_id]) movsByRegister[movement.cash_register_id] = [];
+      movsByRegister[movement.cash_register_id].push(movement);
+    }
 
     return registers.map(r => {
       const regMovements = movsByRegister[r.id] || [];

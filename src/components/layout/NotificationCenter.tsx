@@ -108,7 +108,7 @@ function useNotificationData() {
     queryKey: ['notification-center', user?.id, selectedCompanyId, selectedStoreIds, can('products'), can('sales'), can('appointments'), can('service_orders'), can('financial'), can('fiscal'), canViewCompany, canViewStore],
     enabled: Boolean(user && selectedCompanyId), staleTime: 60_000, refetchInterval: 120_000,
     queryFn: async () => {
-      const requests: Promise<any>[] = [];
+      const requests: PromiseLike<any>[] = [];
       const labels: string[] = [];
       if (can('products')) { requests.push(localApi.from('products').select('*, product_stock(*), product_images(*)')); labels.push('products'); }
       if (can('sales')) { requests.push(localApi.from('sales').select('*, sale_items(*)')); labels.push('sales'); }

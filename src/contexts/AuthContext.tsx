@@ -43,7 +43,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         lastSessionRef.current = session?.session_id || session?.access_token || null;
         setSession(session);
         if (session?.user) {
-          fetchUserProfile(session.user);
+          fetchUserProfile(session.user as LocalAuthUser);
         } else {
           setLoading(false);
         }
@@ -63,14 +63,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       lastSessionRef.current = newSessionId;
       setSession(session);
       if (session?.user) {
-        fetchUserProfile(session.user);
+        fetchUserProfile(session.user as LocalAuthUser);
       } else {
         setUser(null);
         setLoading(false);
       }
     });
 
-    return () => subscription.unsubscribe();
+    return () => { subscription.unsubscribe(); };
   }, []);
 
   const fetchUserProfile = async (localApiUser: LocalAuthUser) => {
