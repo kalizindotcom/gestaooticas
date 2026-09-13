@@ -5,6 +5,7 @@ import { createRequire } from 'node:module';
 import { fileURLToPath } from 'node:url';
 import initSqlJs, { type Database, type SqlJsStatic } from 'sql.js';
 import bcrypt from 'bcryptjs';
+import { CURRENT_SCHEMA_VERSION, runMigrations } from './migrations.js';
 
 const require = createRequire(import.meta.url);
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -12,7 +13,7 @@ const dataDir = path.resolve(process.env.OTICA_DATA_DIR || path.join(projectRoot
 const databasePath = path.join(dataDir, 'otica-nordestina.sqlite');
 const backupDir = path.join(dataDir, 'backups');
 const restorePendingPath = path.join(backupDir, 'restore-pending.json');
-const SCHEMA_VERSION = '20';
+const SCHEMA_VERSION = String(CURRENT_SCHEMA_VERSION);
 
 let SQL: SqlJsStatic;
 let database: Database;
@@ -28,7 +29,7 @@ function bindParameters(params: unknown[]): SqlParameter[] {
   });
 }
 
-const schema = `
+export const schema = `
 PRAGMA foreign_keys = ON;
 CREATE TABLE IF NOT EXISTS app_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS password_reset_tokens (
@@ -487,141 +488,7 @@ export async function initDatabase() {
   if (existing) createStartupBackup();
   database = existing ? new SQL.Database(existing) : new SQL.Database();
   database.run(schema);
-  ensureColumn('products', 'barcode', 'TEXT');
-  ensureColumn('products', 'created_by', 'TEXT');
-  ensureColumn('products', 'ncm', 'TEXT');
-  ensureColumn('products', 'cest', 'TEXT');
-  ensureColumn('products', 'tax_origin', 'TEXT');
-  ensureColumn('products', 'commercial_unit', "TEXT DEFAULT 'UN'");
-  ensureColumn('products', 'taxable_unit', "TEXT DEFAULT 'UN'");
-  ensureColumn('products', 'default_cfop', 'TEXT');
-  ensureColumn('products', 'default_cst', 'TEXT');
-  ensureColumn('products', 'default_csosn', 'TEXT');
-  ensureColumn('products', 'tax_notes', 'TEXT');
-  ensureColumn('products', 'unit', "TEXT DEFAULT 'un'");
-  ensureColumn('products', 'product_type', "TEXT DEFAULT 'product'");
-  ensureColumn('products', 'supplier_name', 'TEXT');
-  ensureColumn('products', 'min_stock', 'INTEGER DEFAULT 0');
-  ensureColumn('products', 'max_stock', 'INTEGER');
-  ensureColumn('products', 'promotional_price', 'REAL');
-  ensureColumn('products', 'updated_at', 'TEXT');
-  ensureColumn('products', 'updated_by', 'TEXT');
-  ensureColumn('products', 'updated_by_name', 'TEXT');
-  ensureColumn('profiles', 'session_version', 'INTEGER DEFAULT 1');
-  ensureColumn('product_stock', 'reserved_quantity', 'INTEGER DEFAULT 0');
-  ensureColumn('product_stock', 'min_quantity', 'INTEGER DEFAULT 0');
-  ensureColumn('product_stock', 'max_quantity', 'INTEGER');
-  ensureColumn('product_stock', 'location', 'TEXT');
-  ensureColumn('product_stock', 'updated_at', 'TEXT');
-  ensureColumn('product_movements', 'quantity_before', 'INTEGER');
-  ensureColumn('product_movements', 'quantity_after', 'INTEGER');
-  ensureColumn('product_movements', 'unit_cost', 'REAL');
-  ensureColumn('product_movements', 'document_number', 'TEXT');
-  ensureColumn('product_movements', 'supplier_name', 'TEXT');
-  ensureColumn('product_movements', 'reason', 'TEXT');
-  ensureColumn('product_movements', 'reference_type', 'TEXT');
-  ensureColumn('product_movements', 'reference_id', 'TEXT');
-  ensureColumn('product_movements', 'reserved_before', 'INTEGER DEFAULT 0');
-  ensureColumn('product_movements', 'reserved_after', 'INTEGER DEFAULT 0');
-  ensureColumn('service_orders', 'product_id', 'TEXT');
-  ensureColumn('service_orders', 'product_quantity', 'INTEGER DEFAULT 1');
-  database.run('CREATE INDEX IF NOT EXISTS idx_service_orders_product ON service_orders(product_id)');
-  database.run('CREATE INDEX IF NOT EXISTS idx_financial_entries_due_status ON financial_entries(company_id, store_id, due_date, status)');
-  database.run('CREATE INDEX IF NOT EXISTS idx_financial_entries_origin ON financial_entries(origin_table, origin_id)');
-  database.run('CREATE INDEX IF NOT EXISTS idx_financial_budgets_period ON financial_budgets(company_id, store_id, reference_month)');
-  database.run('CREATE INDEX IF NOT EXISTS idx_financial_approvals_entry ON financial_approvals(entry_id, status)');
-  database.run('CREATE INDEX IF NOT EXISTS idx_financial_transfers_company ON financial_transfers(company_id, transfer_date)');
-  database.run('CREATE INDEX IF NOT EXISTS idx_financial_card_settlements_expected ON financial_card_settlements(company_id, store_id, expected_date, status)');
-  seedProductTaxonomy();
-  ensureColumn('sales', 'discount', 'REAL DEFAULT 0');
-  ensureColumn('sales', 'installments', 'INTEGER');
-  ensureColumn('sales', 'service_order_id', 'TEXT');
-  ensureColumn('sales', 'notes', 'TEXT');
-  ensureColumn('service_orders', 'prescription_date', 'TEXT');
-  ensureColumn('service_orders', 'prescription_valid_until', 'TEXT');
-  ensureColumn('service_orders', 'prescription_professional_id', 'TEXT');
-  ensureColumn('service_orders', 'prescription_id', 'TEXT');
-  ensureColumn('customers', 'customer_type', "TEXT DEFAULT 'individual'");
-  ensureColumn('customers', 'nickname', 'TEXT');
-  ensureColumn('customers', 'legal_name', 'TEXT');
-  ensureColumn('customers', 'cnpj', 'TEXT');
-  ensureColumn('customers', 'state_registration', 'TEXT');
-  ensureColumn('customers', 'gender', 'TEXT');
-  ensureColumn('customers', 'father_name', 'TEXT');
-  ensureColumn('customers', 'mother_name', 'TEXT');
-  ensureColumn('customers', 'responsible_name', 'TEXT');
-  ensureColumn('customers', 'responsible_relationship', 'TEXT');
-  ensureColumn('customers', 'profession', 'TEXT');
-  ensureColumn('customers', 'education', 'TEXT');
-  ensureColumn('customers', 'origin', 'TEXT');
-  ensureColumn('customers', 'external_code', 'TEXT');
-  ensureColumn('customers', 'discount_percent', 'REAL');
-  ensureColumn('customers', 'family_income', 'REAL');
-  ensureColumn('customers', 'insurance', 'TEXT');
-  ensureColumn('customers', 'preferred_seller_id', 'TEXT');
-  ensureColumn('customers', 'address_complement', 'TEXT');
-  ensureColumn('customers', 'phones_json', "TEXT DEFAULT '[]'");
-  ensureColumn('customers', 'emails_json', "TEXT DEFAULT '[]'");
-  ensureColumn('customers', 'references_json', "TEXT DEFAULT '[]'");
-  ensureColumn('financial_entries', 'created_by_name', 'TEXT');
-  ensureColumn('financial_entries', 'updated_by', 'TEXT');
-  ensureColumn('financial_entries', 'updated_by_name', 'TEXT');
-  ensureColumn('financial_entries', 'settled_by', 'TEXT');
-  ensureColumn('financial_entries', 'settled_by_name', 'TEXT');
-  ensureColumn('financial_entries', 'settled_at', 'TEXT');
-  ensureColumn('financial_entries', 'paid_amount', 'REAL DEFAULT 0');
-  ensureColumn('financial_entries', 'payment_note', 'TEXT');
-  ensureColumn('financial_entries', 'original_amount', 'REAL');
-  ensureColumn('financial_entries', 'interest_amount', 'REAL DEFAULT 0');
-  ensureColumn('financial_entries', 'fine_amount', 'REAL DEFAULT 0');
-  ensureColumn('financial_entries', 'discount_amount', 'REAL DEFAULT 0');
-  ensureColumn('financial_entries', 'net_amount', 'REAL');
-  ensureColumn('financial_entries', 'card_fee_percent', 'REAL DEFAULT 0');
-  ensureColumn('financial_entries', 'card_fee_amount', 'REAL DEFAULT 0');
-  ensureColumn('financial_entries', 'anticipated_at', 'TEXT');
-  ensureColumn('financial_entries', 'installment_group_id', 'TEXT');
-  ensureColumn('financial_entries', 'installment_number', 'INTEGER');
-  ensureColumn('financial_entries', 'installment_total', 'INTEGER');
-  ensureColumn('financial_entries', 'approval_status', "TEXT DEFAULT 'approved'");
-  ensureColumn('financial_entries', 'approved_by', 'TEXT');
-  ensureColumn('financial_entries', 'approved_at', 'TEXT');
-  ensureColumn('financial_entries', 'approval_note', 'TEXT');
-  ensureColumn('financial_entries', 'reversed_entry_id', 'TEXT');
-  ensureColumn('financial_entries', 'reversal_reason', 'TEXT');
-  ensureColumn('financial_entries', 'recurrence_source_id', 'TEXT');
-  ensureColumn('fixed_costs', 'supplier_name', 'TEXT');
-  ensureColumn('fixed_costs', 'contract_number', 'TEXT');
-  ensureColumn('fixed_costs', 'annual_adjustment_percent', 'REAL DEFAULT 0');
-  ensureColumn('fixed_costs', 'last_adjustment_at', 'TEXT');
-  ensureColumn('fixed_costs', 'responsible_name', 'TEXT');
-  ensureColumn('fixed_costs', 'renewal_date', 'TEXT');
-  ensureColumn('fixed_costs', 'document_url', 'TEXT');
-  ensureColumn('financial_card_settlements', 'bank_transaction_id', 'TEXT');
-  ensureColumn('financial_card_settlements', 'created_by', 'TEXT');
-  ensureColumn('financial_card_settlements', 'created_by_name', 'TEXT');
-  ensureColumn('financial_card_settlements', 'settled_by', 'TEXT');
-  ensureColumn('financial_card_settlements', 'settled_by_name', 'TEXT');
-  ensureColumn('cash_registers', 'opened_by_name', 'TEXT');
-  ensureColumn('cash_registers', 'closed_by_name', 'TEXT');
-  ensureColumn('cash_register_movements', 'created_by_name', 'TEXT');
-  ensureColumn('financial_transfers', 'created_by_name', 'TEXT');
-  ensureColumn('financial_daily_closings', 'closed_by_name', 'TEXT');
-  ensureColumn('financial_approvals', 'requested_by_name', 'TEXT');
-  ensureColumn('financial_approvals', 'approved_by_name', 'TEXT');
-  ensureColumn('bank_reconciliations', 'created_by', 'TEXT');
-  ensureColumn('bank_reconciliations', 'created_by_name', 'TEXT');
-  ensureColumn('bank_transactions', 'created_by', 'TEXT');
-  ensureColumn('bank_transactions', 'created_by_name', 'TEXT');
-  ensureColumn('fixed_costs', 'updated_by', 'TEXT');
-  ensureColumn('fixed_costs', 'updated_by_name', 'TEXT');
-  ensureColumn('fixed_cost_payments', 'created_by_name', 'TEXT');
-  ensureColumn('bank_reconciliations', 'reconciled_by_name', 'TEXT');
-  ensureColumn('bank_transactions', 'reconciled_by_name', 'TEXT');
-  database.run('CREATE INDEX IF NOT EXISTS idx_financial_entries_installments ON financial_entries(installment_group_id, installment_number)');
-  database.run("UPDATE financial_entries SET paid_amount = amount WHERE status = 'paid' AND COALESCE(paid_amount, 0) = 0");
-  database.run("UPDATE financial_entries SET original_amount = amount WHERE original_amount IS NULL");
-  database.run("UPDATE financial_entries SET net_amount = amount WHERE net_amount IS NULL");
-  database.run("UPDATE financial_entries SET payment_date = NULL, paid_amount = 0, updated_at = ? WHERE origin_table = 'sales' AND status = 'cancelled'", [now()]);
+  runMigrations(database);
   seedRoles();
   seedPermissions();
   seedFinancialCategories();
@@ -634,11 +501,6 @@ export async function initDatabase() {
   return database;
 }
 
-function ensureColumn(table: string, column: string, definition: string) {
-  const columns = database.exec(`PRAGMA table_info(${table})`)[0]?.values ?? [];
-  const exists = columns.some((row) => String(row[1]) === column);
-  if (!exists) database.run(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
-}
 
 const permissionSeeds: Array<[string, string, string]> = [
   ['perm-dashboard-view', 'dashboard', 'view'], ['perm-dashboard-generate-insights', 'dashboard', 'generate_insights'],

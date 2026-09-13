@@ -51,6 +51,7 @@ import {
 } from './backupService.js';
 import { resolveFiscalProvider } from './fiscalProvider.js';
 import { canTransitionFiscalStatus, isProductionEnvironment } from './fiscalDomain.js';
+import { getMigrationStatus } from './migrations.js';
 import {
   allowInitialSignup,
   allowLocalResetToken,
@@ -1066,7 +1067,10 @@ app.get('/api/admin/integrity/latest', requireAuth, (request: AuthenticatedReque
   if (!requireBackupMaster(request, response)) return;
   return response.json({ data: getDataIntegrityReport(), error: null });
 });
-
+app.get('/api/admin/database/migrations', requireAuth, (request: AuthenticatedRequest, response: Response) => {
+  if (!requireBackupMaster(request, response)) return;
+  return response.json({ data: getMigrationStatus(getDatabase()), error: null });
+});
 app.get('/api/admin/integrity/history', requireAuth, (request: AuthenticatedRequest, response: Response) => {
   if (!requireBackupMaster(request, response)) return;
   return response.json({ data: listDataIntegrityChecks(Number(request.query.limit || 20)), error: null });

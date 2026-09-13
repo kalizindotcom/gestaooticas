@@ -146,6 +146,16 @@ describe('isolamento HTTP por empresa e loja', () => {
     if (dataDirectory) await rm(dataDirectory, { recursive: true, force: true });
   });
 
+  it('expõe ao master o status formal do schema aplicado', async () => {
+    const result = await api('/api/admin/database/migrations', { token: masterToken });
+    expect(result.status).toBe(200);
+    expect((result.body.data as { currentVersion: number; targetVersion: number; applied: Array<{ version: number }> })).toMatchObject({ currentVersion: 21, targetVersion: 21 });
+    expect((result.body.data as { applied: Array<{ version: number }> }).applied.map((migration) => migration.version)).toEqual([20, 21]);
+
+    const scoped = await api('/api/admin/database/migrations', { token: scopedToken });
+    expect(scoped.status).toBe(403);
+  });
+
   it('não lista nem altera registros de outra empresa', async () => {
     const list = await api('/api/tables/customers?eq[id]=customer-b', { token: scopedToken });
     expect(list.status).toBe(200);
