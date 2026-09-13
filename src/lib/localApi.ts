@@ -564,6 +564,15 @@ const backupAdmin = {
     const params = jobId ? `?job_id=${encodeURIComponent(jobId)}` : '';
     return request<Record<string, any>[]>(`/admin/backups/events${params}`);
   },
+  async integrityLatest() {
+    return request<Record<string, any>>('/admin/integrity/latest');
+  },
+  async integrityHistory(limit = 20) {
+    return request<Record<string, any>[]>(`/admin/integrity/history?limit=${encodeURIComponent(String(limit))}`);
+  },
+  async runIntegrityCheck() {
+    return request<Record<string, any>>('/admin/integrity/check', { method: 'POST', body: JSON.stringify({}) });
+  },
   async run(label = 'manual', sendToDrive = false) {
     return request<Record<string, any>>('/admin/backups/run', { method: 'POST', body: JSON.stringify({ label, send_to_drive: sendToDrive }) });
   },

@@ -38,7 +38,10 @@ import {
   inspectArchive,
   listBackupEvents,
   listBackupJobs,
+  listDataIntegrityChecks,
   listGoogleDriveBackups,
+  getDataIntegrityReport,
+  runDataIntegrityCheck,
   restoreBackup,
   runBackupScheduler,
   saveBackupSettings,
@@ -857,6 +860,25 @@ app.get('/api/admin/backups/history', requireAuth, (request: AuthenticatedReques
 app.get('/api/admin/backups/events', requireAuth, (request: AuthenticatedRequest, response: Response) => {
   if (!requireBackupMaster(request, response)) return;
   return response.json({ data: listBackupEvents(request.query.job_id ? String(request.query.job_id) : undefined, Number(request.query.limit || 200)), error: null });
+});
+
+app.get('/api/admin/integrity/latest', requireAuth, (request: AuthenticatedRequest, response: Response) => {
+  if (!requireBackupMaster(request, response)) return;
+  return response.json({ data: getDataIntegrityReport(), error: null });
+});
+
+app.get('/api/admin/integrity/history', requireAuth, (request: AuthenticatedRequest, response: Response) => {
+  if (!requireBackupMaster(request, response)) return;
+  return response.json({ data: listDataIntegrityChecks(Number(request.query.limit || 20)), error: null });
+});
+
+app.post('/api/admin/integrity/check', requireAuth, (request: AuthenticatedRequest, response: Response) => {
+  if (!requireBackupMaster(request, response)) return;
+  try {
+    return response.status(201).json({ data: runDataIntegrityCheck(request.userId), error: null });
+  } catch (error) {
+    return response.status(500).json({ data: null, error: errorPayload(error) });
+  }
 });
 
 app.post('/api/admin/backups/run', requireAuth, async (request: AuthenticatedRequest, response: Response) => {

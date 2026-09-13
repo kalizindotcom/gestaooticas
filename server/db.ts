@@ -11,6 +11,7 @@ const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '
 const dataDir = path.join(projectRoot, 'data');
 const databasePath = path.join(dataDir, 'otica-nordestina.sqlite');
 const backupDir = path.join(dataDir, 'backups');
+const restorePendingPath = path.join(backupDir, 'restore-pending.json');
 const SCHEMA_VERSION = '20';
 
 let SQL: SqlJsStatic;
@@ -329,6 +330,17 @@ CREATE TABLE IF NOT EXISTS backup_events (
   created_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS data_integrity_checks (
+  id TEXT PRIMARY KEY,
+  status TEXT NOT NULL,
+  issue_count INTEGER DEFAULT 0,
+  critical_count INTEGER DEFAULT 0,
+  warning_count INTEGER DEFAULT 0,
+  summary_json TEXT DEFAULT '{}',
+  created_by TEXT,
+  created_at TEXT NOT NULL
+);
+
 CREATE INDEX IF NOT EXISTS idx_backup_jobs_status_created ON backup_jobs(status, created_at);
 CREATE INDEX IF NOT EXISTS idx_backup_jobs_schedule ON backup_jobs(schedule_period, schedule_slot);
 CREATE INDEX IF NOT EXISTS idx_backup_events_job ON backup_events(job_id, created_at);
@@ -357,8 +369,108 @@ CREATE INDEX IF NOT EXISTS idx_fiscal_xml_imports_company_store ON fiscal_xml_im
 const jsonColumns = new Set(['companies', 'stores', 'tags', 'audit_log', 'recurrence_config', 'metadata', 'phones_json', 'emails_json', 'references_json', 'manifest_json', 'details_json']);
 const booleanColumns = new Set(['is_system', 'is_active', 'is_reconciled', 'is_recurring']);
 
+type PendingRestore = {
+  job_id: string;
+  pre_restore_job_id: string | null;
+  restored_at: string;
+  database_stage: string;
+  database_sha256: string;
+  restore_uploads: boolean;
+  uploads_stage: string | null;
+};
+
+function pathInsideBackup(candidate: string) {
+  const resolved = path.resolve(candidate);
+  const root = path.resolve(backupDir);
+  return resolved.startsWith(`${root}${path.sep}`);
+}
+
+function sha256Path(candidate: string) {
+  return createHash('sha256').update(fs.readFileSync(candidate)).digest('hex');
+}
+
+function recoverPendingRestore(): PendingRestore | null {
+  if (!fs.existsSync(restorePendingPath)) return null;
+  const pending = JSON.parse(fs.readFileSync(restorePendingPath, 'utf8')) as Partial<PendingRestore>;
+  const databaseStage = String(pending.database_stage || '');
+  const uploadsStage = pending.uploads_stage ? String(pending.uploads_stage) : null;
+  const restoreStageRoot = path.dirname(path.dirname(databaseStage));
+  if (!pending.job_id || !databaseStage || !pathInsideBackup(databaseStage)) {
+    throw new Error('Restore pendente inválido: estágio do banco não encontrado.');
+  }
+  const expectedHash = String(pending.database_sha256 || '');
+  if (!fs.existsSync(databaseStage)) {
+    if (!fs.existsSync(databasePath) || sha256Path(databasePath) !== expectedHash) throw new Error('Restore pendente inválido: estágio do banco não encontrado.');
+    const uploadsPath = path.join(projectRoot, 'uploads');
+    const oldUploadsPath = `${uploadsPath}.before-restore-${pending.job_id}`;
+    if (pending.restore_uploads && uploadsStage && fs.existsSync(uploadsStage)) {
+      if (fs.existsSync(uploadsPath)) {
+        fs.rmSync(oldUploadsPath, { recursive: true, force: true });
+        fs.renameSync(uploadsPath, oldUploadsPath);
+      }
+      fs.renameSync(uploadsStage, uploadsPath);
+      fs.rmSync(oldUploadsPath, { recursive: true, force: true });
+    }
+    fs.rmSync(restorePendingPath, { force: true });
+    fs.rmSync(restoreStageRoot, { recursive: true, force: true });
+    fs.rmSync(`${databasePath}.before-restore-${pending.job_id}`, { force: true });
+    fs.rmSync(`${path.join(projectRoot, 'uploads')}.before-restore-${pending.job_id}`, { recursive: true, force: true });
+    return {
+      job_id: String(pending.job_id),
+      pre_restore_job_id: pending.pre_restore_job_id ? String(pending.pre_restore_job_id) : null,
+      restored_at: String(pending.restored_at || new Date().toISOString()),
+      database_stage: databaseStage,
+      database_sha256: expectedHash,
+      restore_uploads: Boolean(pending.restore_uploads),
+      uploads_stage: uploadsStage,
+    };
+  }
+  if (!fs.lstatSync(databaseStage).isFile() || sha256Path(databaseStage) !== expectedHash) throw new Error('Restore pendente inválido: hash do banco não confere.');
+  if (uploadsStage && (!pathInsideBackup(uploadsStage) || !fs.existsSync(uploadsStage) || !fs.lstatSync(uploadsStage).isDirectory())) throw new Error('Restore pendente inválido: estágio de uploads não encontrado.');
+
+  const oldDatabasePath = `${databasePath}.before-restore-${pending.job_id}`;
+  const oldUploadsPath = `${path.join(projectRoot, 'uploads')}.before-restore-${pending.job_id}`;
+  const uploadsPath = path.join(projectRoot, 'uploads');
+  let databaseMoved = false;
+  let uploadsMoved = false;
+  try {
+    if (fs.existsSync(databasePath)) {
+      fs.rmSync(oldDatabasePath, { force: true });
+      fs.renameSync(databasePath, oldDatabasePath);
+      databaseMoved = true;
+    }
+    fs.renameSync(databaseStage, databasePath);
+    if (pending.restore_uploads && uploadsStage) {
+      if (fs.existsSync(uploadsPath)) {
+        fs.rmSync(oldUploadsPath, { recursive: true, force: true });
+        fs.renameSync(uploadsPath, oldUploadsPath);
+        uploadsMoved = true;
+      }
+      fs.renameSync(uploadsStage, uploadsPath);
+    }
+    fs.rmSync(restorePendingPath, { force: true });
+    fs.rmSync(restoreStageRoot, { recursive: true, force: true });
+    if (databaseMoved || fs.existsSync(oldDatabasePath)) fs.rmSync(oldDatabasePath, { force: true });
+    if (uploadsMoved || fs.existsSync(oldUploadsPath)) fs.rmSync(oldUploadsPath, { recursive: true, force: true });
+    return {
+      job_id: String(pending.job_id),
+      pre_restore_job_id: pending.pre_restore_job_id ? String(pending.pre_restore_job_id) : null,
+      restored_at: String(pending.restored_at || new Date().toISOString()),
+      database_stage: databaseStage,
+      database_sha256: String(pending.database_sha256),
+      restore_uploads: Boolean(pending.restore_uploads),
+      uploads_stage: uploadsStage,
+    };
+  } catch (error) {
+    if (!fs.existsSync(databasePath) && databaseMoved) fs.renameSync(oldDatabasePath, databasePath);
+    if (!fs.existsSync(uploadsPath) && uploadsMoved) fs.renameSync(oldUploadsPath, uploadsPath);
+    throw error;
+  }
+}
+
 export async function initDatabase() {
   fs.mkdirSync(dataDir, { recursive: true });
+  const pendingRestore = recoverPendingRestore();
   SQL = await initSqlJs({ locateFile: (file) => path.join(path.dirname(require.resolve('sql.js')), file) });
   const existing = fs.existsSync(databasePath) ? new Uint8Array(fs.readFileSync(databasePath)) : undefined;
   if (existing) createStartupBackup();
@@ -503,6 +615,9 @@ export async function initDatabase() {
   seedPermissions();
   seedFinancialCategories();
   await seedDefaultAdmin();
+  if (pendingRestore) {
+    execute('INSERT OR REPLACE INTO app_meta (key, value, updated_at) VALUES (?, ?, ?)', ['last_restore_completed', JSON.stringify(pendingRestore), now()]);
+  }
   execute('INSERT OR REPLACE INTO app_meta (key, value, updated_at) VALUES (?, ?, ?)', ['schema_version', SCHEMA_VERSION, now()]);
   persistDatabase();
   return database;

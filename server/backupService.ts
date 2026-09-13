@@ -3,8 +3,10 @@ import fsp from 'node:fs/promises';
 import path from 'node:path';
 import { createCipheriv, createDecipheriv, createHash, createHmac, randomBytes } from 'node:crypto';
 import { execFile } from 'node:child_process';
+import { createRequire } from 'node:module';
 import { promisify } from 'node:util';
 import { Readable } from 'node:stream';
+import initSqlJs from 'sql.js';
 import {
   execute,
   getBackupDirectory,
@@ -15,14 +17,25 @@ import {
   selectRows,
 } from './db.js';
 import { authSecret } from './securityConfig.js';
+import { analyzeDataIntegrity, type IntegrityReport } from './dataIntegrity.js';
 
 const execFileAsync = promisify(execFile);
+const require = createRequire(import.meta.url);
 const projectRoot = path.resolve(path.dirname(getDatabasePath()), '..');
 const uploadsRoot = path.join(projectRoot, 'uploads');
 const backupRoot = getBackupDirectory();
 const settingsId = 'default';
 const backupFormatVersion = 1;
 const driveScope = 'https://www.googleapis.com/auth/drive.file';
+const integrityTables = [
+  'companies', 'stores', 'roles', 'permissions', 'role_permissions', 'profiles', 'user_permissions', 'employees', 'customers',
+  'laboratories', 'professionals', 'appointments', 'products', 'product_stock', 'product_movements', 'product_categories',
+  'product_brands', 'product_images', 'product_audits', 'sales', 'sale_items', 'service_orders', 'service_order_timeline',
+  'cash_registers', 'cash_register_movements', 'financial_entries', 'financial_entry_audits', 'fixed_costs', 'fixed_cost_payments',
+  'bank_accounts', 'bank_reconciliations', 'bank_transactions', 'financial_categories', 'financial_budgets', 'financial_approvals',
+  'financial_transfers', 'financial_card_settlements', 'financial_daily_closings', 'prescriptions', 'fiscal_configs', 'fiscal_documents',
+  'fiscal_document_items', 'fiscal_events', 'fiscal_audits', 'fiscal_xml_imports',
+] as const;
 
 export type BackupSettings = {
   id: string;
@@ -116,6 +129,23 @@ async function validateSafeTree(root: string) {
     }
     const fullPath = path.join(root, entry.name);
     if (entry.isDirectory()) await validateSafeTree(fullPath);
+  }
+}
+
+async function validateSqliteFile(filePath: string) {
+  const SQL = await initSqlJs({ locateFile: (file) => path.join(path.dirname(require.resolve('sql.js')), file) });
+  const database = new SQL.Database(new Uint8Array(await fsp.readFile(filePath)));
+  try {
+    const integrity = database.exec('PRAGMA integrity_check');
+    const result = String(integrity[0]?.values?.[0]?.[0] || '').toLowerCase();
+    if (result !== 'ok') throw new Error(`O SQLite restaurado falhou no integrity_check: ${result || 'resultado vazio'}.`);
+    const tableRows = database.exec("SELECT name FROM sqlite_master WHERE type = 'table'");
+    const tables = new Set((tableRows[0]?.values || []).map((row) => String(row[0])));
+    for (const required of ['companies', 'stores', 'profiles', 'customers', 'backup_jobs']) {
+      if (!tables.has(required)) throw new Error(`O SQLite restaurado não possui a tabela obrigatória ${required}.`);
+    }
+  } finally {
+    database.close();
   }
 }
 
@@ -521,6 +551,33 @@ export function listBackupEvents(jobId?: string, limit = 200) {
   return selectRows('SELECT * FROM backup_events ORDER BY created_at DESC LIMIT ?', [Math.min(500, limit)]);
 }
 
+function readIntegrityData() {
+  return Object.fromEntries(integrityTables.map((table) => [table, selectRows(`SELECT * FROM "${table}"`)]));
+}
+
+export function getDataIntegrityReport() {
+  return analyzeDataIntegrity(readIntegrityData());
+}
+
+export function runDataIntegrityCheck(createdBy?: string | null) {
+  const report = getDataIntegrityReport();
+  const status = report.ok ? (report.counts.warning ? 'warning' : 'healthy') : 'critical';
+  const id = newId();
+  execute('INSERT INTO data_integrity_checks (id, status, issue_count, critical_count, warning_count, summary_json, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', [
+    id, status, report.counts.issues, report.counts.critical, report.counts.warning, JSON.stringify(report), createdBy || null, report.checked_at,
+  ]);
+  persistDatabase();
+  return { id, status, ...report };
+}
+
+export function listDataIntegrityChecks(limit = 20) {
+  return selectRows('SELECT * FROM data_integrity_checks ORDER BY created_at DESC LIMIT ?', [Math.min(100, Math.max(1, Number(limit || 20)))]).map((row) => {
+    let summary: unknown = {};
+    try { summary = JSON.parse(String(row.summary_json || '{}')); } catch { /* histórico legado inválido */ }
+    return { ...row, summary_json: summary };
+  });
+}
+
 export async function inspectArchive(archivePath: string) {
   const resolvedArchivePath = path.resolve(String(archivePath || ''));
   const resolvedRoot = path.resolve(backupRoot);
@@ -552,25 +609,41 @@ export async function restoreBackup(jobId: string, confirmation: string) {
   const stage = path.join(backupRoot, `.restore-${jobId}-${Date.now()}`);
   await fsp.rm(stage, { recursive: true, force: true });
   await fsp.mkdir(stage, { recursive: true });
-  await execFileAsync('tar', ['-xzf', archivePath, '-C', stage]);
-  await validateSafeTree(stage);
-  const restoredDb = path.join(stage, 'database', 'otica-nordestina.sqlite');
-  if (inspected.manifest.database) {
-    if (!fs.existsSync(restoredDb)) throw new Error('O banco informado no manifesto não foi encontrado no arquivo.');
+  let pendingWritten = false;
+  try {
+    await execFileAsync('tar', ['-xzf', archivePath, '-C', stage]);
+    await validateSafeTree(stage);
+    const restoredDb = path.join(stage, 'database', 'otica-nordestina.sqlite');
+    if (!inspected.manifest.database || !fs.existsSync(restoredDb)) throw new Error('O backup não contém um banco de dados restaurável.');
     const restoredStat = await fsp.stat(restoredDb);
-    if (restoredStat.size !== inspected.manifest.database.size_bytes || await sha256File(restoredDb) !== inspected.manifest.database.sha256) {
+    const restoredHash = await sha256File(restoredDb);
+    if (restoredStat.size !== inspected.manifest.database.size_bytes || restoredHash !== inspected.manifest.database.sha256) {
       throw new Error('A integridade do banco restaurado não pôde ser confirmada.');
     }
-    await fsp.copyFile(restoredDb, `${getDatabasePath()}.restore-${jobId}`);
-    await fsp.rename(`${getDatabasePath()}.restore-${jobId}`, getDatabasePath());
+    await validateSqliteFile(restoredDb);
+    const stagedDatabase = path.join(stage, 'database', 'otica-nordestina.sqlite');
+    const restoredUploads = path.join(stage, 'uploads');
+    const pendingPath = path.join(backupRoot, 'restore-pending.json');
+    const pending = {
+      job_id: jobId,
+      pre_restore_job_id: String(preRestore.id || ''),
+      restored_at: now(),
+      database_stage: stagedDatabase,
+      database_sha256: restoredHash,
+      restore_uploads: Boolean(inspected.manifest.includes.uploads && fs.existsSync(restoredUploads)),
+      uploads_stage: fs.existsSync(restoredUploads) ? restoredUploads : null,
+    };
+    const pendingTemp = `${pendingPath}.tmp-${newId()}`;
+    await fsp.writeFile(pendingTemp, JSON.stringify(pending, null, 2), { mode: 0o600 });
+    await fsp.rename(pendingTemp, pendingPath);
+    pendingWritten = true;
+    addEvent(jobId, 'restore_scheduled', 'Restore validado e agendado para o próximo boot.', { pre_restore_job_id: preRestore.id, sha256: restoredHash });
+    updateJob(jobId, { status: 'restore_pending', completed_at: now(), error_message: null });
+    persistDatabase();
+  } catch (error) {
+    if (!pendingWritten) await fsp.rm(stage, { recursive: true, force: true });
+    throw error;
   }
-  const restoredUploads = path.join(stage, 'uploads');
-  if (fs.existsSync(restoredUploads)) {
-    await fsp.rm(uploadsRoot, { recursive: true, force: true });
-    await fsp.cp(restoredUploads, uploadsRoot, { recursive: true });
-  }
-  await fsp.rm(stage, { recursive: true, force: true });
-  await fsp.writeFile(path.join(backupRoot, 'restore-pending.json'), JSON.stringify({ job_id: jobId, pre_restore_job_id: preRestore.id, restored_at: now() }));
   setTimeout(() => process.exit(0), 750);
   return { job_id: jobId, pre_restore_job_id: preRestore.id, restart_scheduled: true };
 }
