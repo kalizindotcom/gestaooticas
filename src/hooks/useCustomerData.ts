@@ -362,86 +362,13 @@ export function useCreateOrUpdateCustomerServiceOrder(customer: any) {
       };
 
       if (id) {
-        const { data: updated, error } = await localApi.from('service_orders').update(orderPayload).eq('id', id).select().single();
+        const { data: updated, error } = await localApi.operations.updateServiceOrder(id, orderPayload);
         if (error) throw error;
-
-        const { data: linkedEntries, error: linkedEntriesError } = await localApi
-          .from('financial_entries')
-          .select('*')
-          .eq('origin_table', 'service_orders')
-          .eq('origin_id', id);
-        if (linkedEntriesError) throw linkedEntriesError;
-
-        if (total <= 0) {
-          const { error: deleteFinancialError } = await localApi.from('financial_entries').delete().eq('origin_table', 'service_orders').eq('origin_id', id);
-          if (deleteFinancialError) throw deleteFinancialError;
-        } else {
-          const existingEntry = (linkedEntries || [])[0];
-          const previousReceived = Math.min(Math.max(Number(data.paidAmount || 0), 0), total);
-          const nextStatus = previousReceived >= total ? 'paid' : previousReceived > 0 ? 'partially_paid' : (dueDate < todayIso() ? 'overdue' : 'pending');
-          const financialPayload = {
-            company_id: selectedCompanyId,
-            store_id: data.storeId,
-            type: 'receivable',
-            description: `O.S. #${String(id).slice(0, 8)} - ${customer.name}`,
-            amount: total,
-            due_date: dueDate,
-            payment_date: previousReceived > 0 ? (existingEntry?.payment_date || new Date().toISOString()) : null,
-            paid_amount: previousReceived,
-            status: nextStatus,
-            category: 'Ordem de Serviço',
-            payment_method: data.paymentMethod || null,
-            payment_note: data.paymentNote?.trim() || null,
-            origin_table: 'service_orders',
-            origin_id: id,
-            customer_id: customer.id,
-            supplier_customer_name: customer.name,
-          };
-          if (existingEntry?.id) {
-            const { error: updateFinancialError } = await localApi.from('financial_entries').update(financialPayload).eq('id', existingEntry.id);
-            if (updateFinancialError) throw updateFinancialError;
-            const duplicateEntries = (linkedEntries || []).filter((entry: any) => entry.id !== existingEntry.id);
-            for (const duplicate of duplicateEntries) {
-              const { error: duplicateError } = await localApi.from('financial_entries').delete().eq('id', duplicate.id);
-              if (duplicateError) throw duplicateError;
-            }
-          } else {
-            const { error: insertFinancialError } = await localApi.from('financial_entries').insert(financialPayload);
-            if (insertFinancialError) throw insertFinancialError;
-          }
-        }
-
-        const { error: timelineError } = await localApi.from('service_order_timeline').insert({ service_order_id: id, action: 'O.S. atualizada', status: orderPayload.status });
-        if (timelineError) throw timelineError;
         return updated;
       }
 
-      const { data: order, error } = await localApi.from('service_orders').insert(orderPayload).select().single();
+      const { data: order, error } = await localApi.operations.createServiceOrder(orderPayload, crypto.randomUUID());
       if (error) throw error;
-      await localApi.from('service_order_timeline').insert({ service_order_id: order.id, action: 'O.S. criada', status: 'opened' });
-
-      if (total > 0) {
-        const { error: financialError } = await localApi.from('financial_entries').insert({
-          company_id: selectedCompanyId,
-          store_id: data.storeId,
-          type: 'receivable',
-          description: `O.S. #${String(order.id).slice(0, 8)} - ${customer.name}`,
-          amount: total,
-          due_date: dueDate,
-          payment_date: paidAmount > 0 ? new Date().toISOString() : null,
-          status: paidAmount >= total ? 'paid' : paidAmount > 0 ? 'partially_paid' : (dueDate < todayIso() ? 'overdue' : 'pending'),
-            category: 'Ordem de Serviço',
-            payment_method: data.paymentMethod || null,
-            paid_amount: paidAmount,
-          payment_note: data.paymentNote?.trim() || null,
-          origin_table: 'service_orders',
-          origin_id: order.id,
-          customer_id: customer.id,
-          supplier_customer_name: customer.name,
-        });
-        if (financialError) throw financialError;
-      }
-
       return order;
     },
     onSuccess: () => invalidateCustomerQueries(queryClient, customer?.id),
@@ -452,11 +379,7 @@ export function useDeleteCustomerServiceOrder(customerId?: string) {
   const queryClient = useQueryClient();
   return useMutation({
     mutationFn: async (id: string) => {
-      const { error: financialError } = await localApi.from('financial_entries').delete().eq('origin_table', 'service_orders').eq('origin_id', id);
-      if (financialError) throw financialError;
-      const { error: timelineError } = await localApi.from('service_order_timeline').delete().eq('service_order_id', id);
-      if (timelineError) throw timelineError;
-      const { error } = await localApi.from('service_orders').delete().eq('id', id);
+      const { error } = await localApi.operations.deleteServiceOrder(id);
       if (error) throw error;
       return true;
     },

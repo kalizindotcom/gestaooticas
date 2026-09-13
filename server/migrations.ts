@@ -43,7 +43,7 @@ type MigrationOptions = {
 };
 
 export const LEGACY_BASELINE_VERSION = 20;
-export const CURRENT_SCHEMA_VERSION = 21;
+export const CURRENT_SCHEMA_VERSION = 22;
 
 const migrationTableSql = `
   CREATE TABLE IF NOT EXISTS schema_migrations (
@@ -195,10 +195,18 @@ const legacyOperations: readonly MigrationOperation[] = [
 export const migrations: readonly Migration[] = [
   { version: LEGACY_BASELINE_VERSION, name: 'legacy-schema-reconciliation-v20', operations: legacyOperations },
   {
-    version: CURRENT_SCHEMA_VERSION,
+    version: 21,
     name: 'data-integrity-check-history-index',
     operations: [
       { kind: 'sql', sql: 'CREATE INDEX IF NOT EXISTS idx_data_integrity_checks_status_created ON data_integrity_checks(status, created_at)' },
+    ],
+  },
+  {
+    version: CURRENT_SCHEMA_VERSION,
+    name: 'service-order-idempotency-key',
+    operations: [
+      { kind: 'column', table: 'service_orders', column: 'idempotency_key', definition: 'TEXT' },
+      { kind: 'sql', sql: 'CREATE UNIQUE INDEX IF NOT EXISTS idx_service_orders_idempotency_key ON service_orders(idempotency_key) WHERE idempotency_key IS NOT NULL' },
     ],
   },
 ];

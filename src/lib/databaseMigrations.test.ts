@@ -27,7 +27,7 @@ describe('migrações formais do banco', () => {
     const result = runMigrations(database, { now: () => '2026-09-13T00:00:00.000Z' });
 
     expect(result.currentVersion).toBe(CURRENT_SCHEMA_VERSION);
-    expect(result.applied.map((migration) => migration.version)).toEqual([LEGACY_BASELINE_VERSION, CURRENT_SCHEMA_VERSION]);
+    expect(result.applied.map((migration) => migration.version)).toEqual([LEGACY_BASELINE_VERSION, 21, CURRENT_SCHEMA_VERSION]);
     expect(database.exec('PRAGMA index_list(data_integrity_checks)')[0].values.map((row) => row[1])).toContain('idx_data_integrity_checks_status_created');
   });
 

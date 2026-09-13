@@ -411,6 +411,10 @@ const storage = {
 };
 
 const fiscal = {
+  getCapabilities(companyId: string, storeId: string) {
+    const params = new URLSearchParams({ company_id: companyId, store_id: storeId });
+    return request<{ simulation_enabled: boolean; external_transmission_enabled: boolean; production_enabled: boolean; provider_adapter: string | null; environment: string; message: string }>(`/operations/fiscal/capabilities?${params.toString()}`);
+  },
   getConfig(companyId: string, storeId: string) {
     const params = new URLSearchParams({ company_id: companyId, store_id: storeId });
     return request<FiscalConfig | null>(`/operations/fiscal/config?${params.toString()}`);
@@ -470,6 +474,15 @@ const functions = {
 };
 
 const operations = {
+  createServiceOrder(input: Record<string, unknown>, idempotencyKey: string) {
+    return request<Record<string, unknown>>('/operations/service-orders', { method: 'POST', headers: { 'Idempotency-Key': idempotencyKey }, body: JSON.stringify(input) });
+  },
+  updateServiceOrder(id: string, input: Record<string, unknown>) {
+    return request<Record<string, unknown>>(`/operations/service-orders/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify(input) });
+  },
+  deleteServiceOrder(id: string) {
+    return request<{ id: string; deleted_count: number }>(`/operations/service-orders/${encodeURIComponent(id)}`, { method: 'DELETE', body: JSON.stringify({}) });
+  },
   updateServiceOrderStatus(id: string, status: string) {
     return request<{ id: string; previous_status: string; status: string; changed: boolean; changed_by?: string; changed_at?: string; timeline_id?: string }>(`/operations/service-orders/${encodeURIComponent(id)}/status`, { method: 'PATCH', body: JSON.stringify({ status }) });
   },

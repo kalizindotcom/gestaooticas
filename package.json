@@ -15,6 +15,7 @@
     "preview": "vite preview",
     "smoke:api": "node scripts/smoke-api.mjs",
     "smoke:continuity": "node scripts/smoke-continuity.mjs",
+    "dr:backup": "node scripts/smoke-continuity.mjs",
     "health:production": "node scripts/check-health.mjs",
     "test": "vitest run",
     "test:report-scope": "vitest run src/lib/reportScope.test.ts",

@@ -12,6 +12,7 @@ import {
   execute,
   getDatabase,
   getLastRestoreCompleted,
+  getPersistenceStatus,
   initDatabase,
   newId,
   now,
@@ -1088,7 +1089,7 @@ app.get('/api/admin/database/migrations', requireAuth, (request: AuthenticatedRe
 });
 app.get('/api/admin/metrics', requireAuth, (request: AuthenticatedRequest, response: Response) => {
   if (!requireBackupMaster(request, response)) return;
-  return response.json({ data: { ...getOperationalMetrics(), backups: getBackupOperationalStatus(), last_restore_completed: getLastRestoreCompleted() }, error: null });
+  return response.json({ data: { ...getOperationalMetrics(), persistence: getPersistenceStatus(), backups: getBackupOperationalStatus(), last_restore_completed: getLastRestoreCompleted() }, error: null });
 });
 app.get('/api/admin/integrity/history', requireAuth, (request: AuthenticatedRequest, response: Response) => {
   if (!requireBackupMaster(request, response)) return;
@@ -2499,6 +2500,181 @@ const SERVICE_ORDER_STATUS_LABELS: Record<string, string> = {
   opened: 'Em preparação', waiting_lab: 'Aguardando laboratório', in_production: 'Em produção', ready: 'Pronta', delivered: 'Entregue', cancelled: 'Cancelada',
 };
 const SERVICE_ORDER_STATUS_FLOW = ['opened', 'waiting_lab', 'in_production', 'ready', 'delivered', 'cancelled'];
+const SERVICE_ORDER_KNOWN_STATUSES = new Set([...SERVICE_ORDER_STATUS_FLOW, 'overdue', 'analyzing', 'waiting_approval', 'waiting_part', 'waiting_client']);
+const SERVICE_ORDER_WRITE_FIELDS = [
+  'company_id', 'store_id', 'customer_id', 'technician_id', 'date', 'delivery_date', 'estimated_deadline', 'total', 'paid_amount', 'balance',
+  'payment_method', 'financial_status', 'status', 'priority', 'service_type', 'description', 'product_name', 'lens_name', 'frame_name', 'lab_id',
+  'lab_name', 'provider_name', 'internal_notes', 'od_sph', 'od_cyl', 'od_axis', 'od_add', 'oe_sph', 'oe_cyl', 'oe_axis', 'oe_add',
+  'pupillary_distance', 'largest_diagonal', 'vertical_height', 'frame_size', 'bridge_size', 'frame_and_bridge', 'optical_center_height',
+  'od_far', 'od_near', 'oe_far', 'oe_near', 'prescription_date', 'prescription_valid_until', 'prescription_professional_id', 'prescription_id',
+  'product_id', 'product_quantity',
+] as const;
+
+function serviceOrderById(id: string) {
+  return selectRows('SELECT * FROM service_orders WHERE id = ? LIMIT 1', [id])[0];
+}
+
+function validateServiceOrderLinks(request: AuthenticatedRequest, input: Record<string, unknown>, fallback?: Record<string, unknown>) {
+  const companyId = String(input.company_id ?? fallback?.company_id ?? '').trim();
+  const storeId = String(input.store_id ?? fallback?.store_id ?? '').trim();
+  if (!companyId || !storeId) throw Object.assign(new Error('Empresa e loja são obrigatórias para a O.S.'), { statusCode: 400 });
+  assertCompanyStoreScope(companyId, storeId, request.profile);
+  const customerId = input.customer_id ?? fallback?.customer_id;
+  const customer = customerId ? assertTenantReference('customers', String(customerId), companyId, storeId, 'Cliente', 'store') : undefined;
+  const technicianId = input.technician_id ?? fallback?.technician_id;
+  if (technicianId) assertTenantReference('employees', String(technicianId), companyId, storeId, 'Técnico', 'store');
+  const labId = input.lab_id ?? fallback?.lab_id;
+  if (labId) assertTenantReference('laboratories', String(labId), companyId, null, 'Laboratório');
+  const professionalId = input.prescription_professional_id ?? fallback?.prescription_professional_id;
+  if (professionalId) assertTenantReference('professionals', String(professionalId), companyId, null, 'Profissional da receita');
+  const productId = input.product_id ?? fallback?.product_id;
+  if (productId) assertTenantReference('products', String(productId), companyId, null, 'Produto da O.S.');
+  const prescriptionId = input.prescription_id ?? fallback?.prescription_id;
+  if (prescriptionId) {
+    const prescription = assertTenantReference('prescriptions', String(prescriptionId), companyId, storeId, 'Receita', 'store');
+    if (customer && String(prescription.customer_id || '') !== String(customer.id)) throw Object.assign(new Error('A receita pertence a outro cliente.'), { statusCode: 400, code: 'SERVICE_ORDER_PRESCRIPTION_CUSTOMER_MISMATCH' });
+  }
+  const status = String(input.status ?? fallback?.status ?? 'opened');
+  if (!SERVICE_ORDER_KNOWN_STATUSES.has(status)) throw Object.assign(new Error('Status de O.S. inválido.'), { statusCode: 400, code: 'SERVICE_ORDER_INVALID_STATUS' });
+  const total = Number(input.total ?? fallback?.total ?? 0);
+  const paidAmount = Math.min(Math.max(Number(input.paid_amount ?? fallback?.paid_amount ?? 0), 0), Math.max(total, 0));
+  if (!Number.isFinite(total) || total < 0 || !Number.isFinite(paidAmount)) throw Object.assign(new Error('Valores financeiros da O.S. inválidos.'), { statusCode: 400, code: 'SERVICE_ORDER_INVALID_TOTAL' });
+  return { companyId, storeId, customer, total, paidAmount };
+}
+
+function serviceOrderValues(input: Record<string, unknown>, fallback?: Record<string, unknown>) {
+  const source = { ...(fallback || {}), ...input };
+  const values: Record<string, unknown> = {};
+  for (const field of SERVICE_ORDER_WRITE_FIELDS) {
+    if (field in source) values[field] = source[field] === undefined ? null : source[field];
+  }
+  values.total = Number(values.total || 0);
+  values.paid_amount = Math.min(Math.max(Number(values.paid_amount || 0), 0), Math.max(Number(values.total || 0), 0));
+  values.balance = Number(Math.max(Number(values.total || 0) - Number(values.paid_amount || 0), 0).toFixed(2));
+  values.product_quantity = Math.max(1, Math.floor(Number(values.product_quantity || 1)));
+  values.financial_status = Number(values.balance) <= 0 && Number(values.total) > 0 ? 'paid' : Number(values.paid_amount) > 0 ? 'partially_paid' : 'pending';
+  values.created_at = fallback?.created_at || now();
+  return values;
+}
+
+function writeServiceOrderFinancials(request: AuthenticatedRequest, order: Record<string, unknown>, customer: Record<string, unknown> | undefined) {
+  const orderId = String(order.id);
+  const total = Number(order.total || 0);
+  const paidAmount = Number(order.paid_amount || 0);
+  const linkedEntries = selectRows("SELECT * FROM financial_entries WHERE origin_table = 'service_orders' AND origin_id = ? ORDER BY created_at ASC", [orderId]);
+  if (total <= 0) {
+    execute("DELETE FROM financial_entries WHERE origin_table = 'service_orders' AND origin_id = ?", [orderId]);
+    return;
+  }
+  const dueDate = String(order.delivery_date || order.estimated_deadline || order.date || now()).slice(0, 30);
+  const existingEntry = linkedEntries[0];
+  const status = paidAmount >= total ? 'paid' : paidAmount > 0 ? 'partially_paid' : (dueDate < now().slice(0, 10) ? 'overdue' : 'pending');
+  const values = [
+    String(order.company_id), String(order.store_id), 'receivable', `O.S. #${orderId.slice(0, 8)} - ${String(customer?.name || 'Cliente')}`,
+    total, dueDate, paidAmount > 0 ? (existingEntry?.payment_date || now()) : null, paidAmount, status, 'Ordem de Serviço', order.payment_method || null,
+    order.payment_note || null, 'service_orders', orderId, order.customer_id || null, String(customer?.name || order.customer_name || 'Cliente'),
+  ];
+  const changedAt = now();
+  if (existingEntry?.id) {
+    execute('UPDATE financial_entries SET company_id = ?, store_id = ?, type = ?, description = ?, amount = ?, due_date = ?, payment_date = ?, paid_amount = ?, status = ?, category = ?, payment_method = ?, payment_note = ?, origin_table = ?, origin_id = ?, customer_id = ?, supplier_customer_name = ?, updated_at = ?, updated_by = ?, updated_by_name = ? WHERE id = ?', [...values, changedAt, request.userId, actorName(request.userId), existingEntry.id]);
+    for (const duplicate of linkedEntries.slice(1)) execute('DELETE FROM financial_entries WHERE id = ?', [duplicate.id]);
+  } else {
+    execute('INSERT INTO financial_entries (id, company_id, store_id, type, description, amount, due_date, payment_date, paid_amount, status, category, payment_method, payment_note, origin_table, origin_id, customer_id, supplier_customer_name, created_by, created_by_name, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', [newId(), ...values, request.userId, actorName(request.userId), changedAt, changedAt]);
+  }
+}
+
+function serviceOrderResponse(id: string) {
+  return cleanRow(serviceOrderById(id) || {});
+}
+
+app.post('/api/operations/service-orders', requireAuth, (request: AuthenticatedRequest, response: Response) => {
+  let transactionStarted = false;
+  try {
+    if (!canAccessTable(request, 'service_orders', 'insert')) return response.status(403).json({ data: null, error: { message: 'Sem permissão para criar O.S.', code: '403' } });
+    const input = (request.body || {}) as Record<string, unknown>;
+    const idempotencyKey = String(request.headers['idempotency-key'] || input.idempotency_key || '').trim().slice(0, 180);
+    if (!idempotencyKey) return response.status(400).json({ data: null, error: { message: 'Idempotency-Key é obrigatório para criar uma O.S.', code: 'SERVICE_ORDER_IDEMPOTENCY_REQUIRED' } });
+    const existing = selectRows('SELECT * FROM service_orders WHERE idempotency_key = ? LIMIT 1', [idempotencyKey])[0];
+    if (existing) {
+      if (!rowInScope('service_orders', existing, request.profile)) return response.status(409).json({ data: null, error: { message: 'A chave de idempotência já foi utilizada.', code: 'SERVICE_ORDER_IDEMPOTENCY_CONFLICT' } });
+      return response.status(200).json({ data: serviceOrderResponse(String(existing.id)), error: null });
+    }
+    const scope = validateServiceOrderLinks(request, input);
+    const values = serviceOrderValues({ ...input, company_id: scope.companyId, store_id: scope.storeId, customer_id: input.customer_id || null, idempotency_key: idempotencyKey });
+    const id = newId();
+    getDatabase().run('BEGIN');
+    transactionStarted = true;
+    const fields = [...SERVICE_ORDER_WRITE_FIELDS, 'idempotency_key', 'id', 'created_at'];
+    execute(`INSERT INTO service_orders (${fields.map(quoteIdentifier).join(', ')}) VALUES (${fields.map(() => '?').join(', ')})`, fields.map((field) => field === 'id' ? id : field === 'idempotency_key' ? idempotencyKey : field === 'created_at' ? values.created_at : serializeValue(field, values[field])));
+    execute('INSERT INTO service_order_timeline (id, service_order_id, action, user_name, user_id, status, date, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', [newId(), id, 'O.S. criada', actorName(request.userId), request.userId, values.status || 'opened', now(), now()]);
+    writeServiceOrderFinancials(request, { id, ...values }, scope.customer);
+    if (process.env.NODE_ENV === 'test' && request.headers['x-test-fail-after-os'] === '1') throw Object.assign(new Error('Falha de teste após os efeitos da O.S.'), { statusCode: 500 });
+    getDatabase().run('COMMIT');
+    transactionStarted = false;
+    persistDatabase();
+    return response.status(201).json({ data: serviceOrderResponse(id), error: null });
+  } catch (error) {
+    if (transactionStarted) { try { getDatabase().run('ROLLBACK'); } catch { /* rollback best effort */ } }
+    const statusCode = Number((error as { statusCode?: number })?.statusCode || 400);
+    return response.status(statusCode).json({ data: null, error: errorPayload(error) });
+  }
+});
+
+app.patch('/api/operations/service-orders/:id', requireAuth, (request: AuthenticatedRequest, response: Response) => {
+  let transactionStarted = false;
+  try {
+    if (!canAccessTable(request, 'service_orders', 'update')) return response.status(403).json({ data: null, error: { message: 'Sem permissão para editar O.S.', code: '403' } });
+    const id = String(request.params.id || '');
+    const current = serviceOrderById(id);
+    if (!current) return response.status(404).json({ data: null, error: { message: 'O.S. não encontrada.', code: 'SERVICE_ORDER_NOT_FOUND' } });
+    if (!rowInScope('service_orders', current, request.profile)) return response.status(403).json({ data: null, error: { message: 'O.S. fora do escopo permitido.', code: '403' } });
+    const input = (request.body || {}) as Record<string, unknown>;
+    if ((input.company_id !== undefined && String(input.company_id) !== String(current.company_id)) || (input.store_id !== undefined && String(input.store_id) !== String(current.store_id))) {
+      return response.status(409).json({ data: null, error: { message: 'Empresa e loja da O.S. não podem ser alteradas depois da criação.', code: 'SERVICE_ORDER_SCOPE_IMMUTABLE' } });
+    }
+    const scope = validateServiceOrderLinks(request, input, current);
+    const values = serviceOrderValues({ ...input, company_id: current.company_id, store_id: current.store_id }, current);
+    const updates = [...SERVICE_ORDER_WRITE_FIELDS].filter((field) => field !== 'company_id' && field !== 'store_id').filter((field) => field in values);
+    getDatabase().run('BEGIN');
+    transactionStarted = true;
+    execute(`UPDATE service_orders SET ${updates.map((field) => `${quoteIdentifier(field)} = ?`).join(', ')} WHERE id = ?`, [...updates.map((field) => serializeValue(field, values[field])), id]);
+    execute('INSERT INTO service_order_timeline (id, service_order_id, action, user_name, user_id, status, date, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', [newId(), id, 'O.S. atualizada', actorName(request.userId), request.userId, values.status || current.status || 'opened', now(), now()]);
+    writeServiceOrderFinancials(request, { ...current, ...values, id }, scope.customer);
+    if (process.env.NODE_ENV === 'test' && request.headers['x-test-fail-after-os'] === '1') throw Object.assign(new Error('Falha de teste após os efeitos da O.S.'), { statusCode: 500 });
+    getDatabase().run('COMMIT');
+    transactionStarted = false;
+    persistDatabase();
+    return response.json({ data: serviceOrderResponse(id), error: null });
+  } catch (error) {
+    if (transactionStarted) { try { getDatabase().run('ROLLBACK'); } catch { /* rollback best effort */ } }
+    const statusCode = Number((error as { statusCode?: number })?.statusCode || 400);
+    return response.status(statusCode).json({ data: null, error: errorPayload(error) });
+  }
+});
+
+app.delete('/api/operations/service-orders/:id', requireAuth, (request: AuthenticatedRequest, response: Response) => {
+  let transactionStarted = false;
+  try {
+    if (!canAccessTable(request, 'service_orders', 'delete')) return response.status(403).json({ data: null, error: { message: 'Sem permissão para excluir O.S.', code: '403' } });
+    const id = String(request.params.id || '');
+    const current = serviceOrderById(id);
+    if (!current) return response.status(404).json({ data: null, error: { message: 'O.S. não encontrada.', code: 'SERVICE_ORDER_NOT_FOUND' } });
+    if (!rowInScope('service_orders', current, request.profile)) return response.status(403).json({ data: null, error: { message: 'O.S. fora do escopo permitido.', code: '403' } });
+    getDatabase().run('BEGIN');
+    transactionStarted = true;
+    execute("DELETE FROM financial_entries WHERE origin_table = 'service_orders' AND origin_id = ?", [id]);
+    execute('DELETE FROM service_order_timeline WHERE service_order_id = ?', [id]);
+    execute('DELETE FROM service_orders WHERE id = ?', [id]);
+    getDatabase().run('COMMIT');
+    transactionStarted = false;
+    persistDatabase();
+    return response.json({ data: { id, deleted_count: 1 }, error: null });
+  } catch (error) {
+    if (transactionStarted) { try { getDatabase().run('ROLLBACK'); } catch { /* rollback best effort */ } }
+    const statusCode = Number((error as { statusCode?: number })?.statusCode || 400);
+    return response.status(statusCode).json({ data: null, error: errorPayload(error) });
+  }
+});
 
 function serviceOrderStatusLabel(status: unknown) {
   return SERVICE_ORDER_STATUS_LABELS[String(status || '')] || String(status || 'Sem status');
@@ -2701,6 +2877,22 @@ function fiscalForbidden(response: Response, message = 'Sem permissão para esta
   return response.status(403).json({ data: null, error: { message, code: 'FISCAL_FORBIDDEN' } });
 }
 
+app.get('/api/operations/fiscal/capabilities', requireAuth, (request: AuthenticatedRequest, response: Response) => {
+  if (!fiscalPermission(request, 'view')) return fiscalForbidden(response);
+  const companyId = String(request.query.company_id || '').trim();
+  const storeId = String(request.query.store_id || '').trim();
+  if (!companyId || !storeId || !fiscalScopeAllowed(request, companyId, storeId)) return response.status(403).json({ data: null, error: { message: 'Empresa ou loja fora do escopo permitido.', code: 'FISCAL_SCOPE_FORBIDDEN' } });
+  const config = fiscalConfigForScope(companyId, storeId);
+  return response.json({ data: {
+    simulation_enabled: true,
+    external_transmission_enabled: false,
+    production_enabled: false,
+    provider_adapter: resolveFiscalProvider(String(config?.provider || ''))?.name || null,
+    environment: String(config?.environment || 'homologacao'),
+    message: 'Somente simulação local está habilitada; nenhum documento é transmitido a SEFAZ ou prefeitura.',
+  }, error: null });
+});
+
 function fiscalConfigForScope(companyId: string, storeId: string) {
   return selectRows('SELECT * FROM fiscal_configs WHERE company_id = ? AND store_id = ? LIMIT 1', [companyId, storeId])[0];
 }
@@ -2891,6 +3083,7 @@ app.post('/api/operations/fiscal/from-service-orders/:id', requireAuth, (request
 app.post('/api/operations/fiscal/documents', requireAuth, (request: AuthenticatedRequest, response: Response) => {
   const manual = String(request.body?.operation || '').toLowerCase() === 'manual' || request.body?.manual === true;
   if (!fiscalPermission(request, manual ? 'create_manual' : 'create')) return fiscalForbidden(response, manual ? 'Sem permissão para criar documento fiscal manual.' : 'Sem permissão para criar documento fiscal.');
+  let transactionStarted = false;
   try {
     const companyId = String(request.body?.company_id || '').trim();
     const storeId = String(request.body?.store_id || '').trim();
@@ -2903,6 +3096,7 @@ app.post('/api/operations/fiscal/documents', requireAuth, (request: Authenticate
     if (!customerName || !Number.isFinite(total) || total <= 0) return response.status(400).json({ data: null, error: { message: 'Destinatário e valor total maior que zero são obrigatórios.', code: 'FISCAL_INVALID_TOTAL' } });
     const config = fiscalConfigForScope(companyId, storeId);
     const environment = String(request.body?.environment || config?.environment || 'homologacao');
+    if (!['homologacao', 'producao'].includes(environment)) return response.status(400).json({ data: null, error: { message: 'Ambiente fiscal inválido.', code: 'FISCAL_INVALID_ENVIRONMENT' } });
     const series = String(request.body?.series || (type === 'NFC-e' ? config?.nfce_series : type === 'NFS-e' ? config?.nfse_series : config?.nfe_series) || '1');
     const timestamp = now();
     const id = newId();
@@ -2911,6 +3105,8 @@ app.post('/api/operations/fiscal/documents', requireAuth, (request: Authenticate
     if (existing) return response.status(200).json({ data: fiscalDetail(String(existing.id), request.profile), error: null });
     const items = Array.isArray(request.body?.items) ? request.body.items : [];
     validateFiscalLinks(request, companyId, storeId, request.body?.customer_id, request.body?.origin_table, request.body?.origin_id, items);
+    getDatabase().run('BEGIN');
+    transactionStarted = true;
     execute('INSERT INTO fiscal_documents (id, company_id, store_id, type, operation, environment, series, number, status, customer_id, customer_name, customer_document, origin_table, origin_id, total, discount, notes, idempotency_key, created_by, created_by_name, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', [id, companyId, storeId, type, operation, environment, series, 'draft', request.body?.customer_id || null, customerName, String(request.body?.customer_document || '').replace(/\D/g, '') || null, request.body?.origin_table || null, request.body?.origin_id || null, total, Number(request.body?.discount || 0) || 0, String(request.body?.notes || request.body?.note || '').trim() || null, idempotencyKey, request.userId || null, actorName(request.userId), timestamp, timestamp]);
     for (const rawItem of items) {
       const quantity = Math.max(1, Math.floor(Number(rawItem?.quantity || 1)));
@@ -2918,9 +3114,12 @@ app.post('/api/operations/fiscal/documents', requireAuth, (request: Authenticate
       execute('INSERT INTO fiscal_document_items (id, document_id, product_id, product_name, sku, barcode, ncm, cest, cfop, cst, csosn, quantity, unit_price, total_price, tax_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', [newId(), id, rawItem?.product_id || rawItem?.productId || null, String(rawItem?.product_name || rawItem?.productName || 'Item sem descrição'), rawItem?.sku || null, rawItem?.barcode || null, rawItem?.ncm || null, rawItem?.cest || null, rawItem?.cfop || null, rawItem?.cst || null, rawItem?.csosn || null, quantity, unitPrice, Number(rawItem?.total_price || rawItem?.totalPrice || unitPrice * quantity) || 0, JSON.stringify(rawItem?.tax_json || rawItem?.tax || {}), timestamp]);
     }
     fiscalAudit(request, companyId, storeId, id, 'draft_created', { type, operation, environment, series, customer_name: customerName, total, item_count: items.length, origin_table: request.body?.origin_table || null, origin_id: request.body?.origin_id || null }, timestamp);
+    getDatabase().run('COMMIT');
+    transactionStarted = false;
     persistDatabase();
     return response.status(201).json({ data: fiscalDetail(id, request.profile), error: null });
   } catch (error) {
+    if (transactionStarted) { try { getDatabase().run('ROLLBACK'); } catch { /* rollback best effort */ } }
     const statusCode = Number((error as { statusCode?: number })?.statusCode || 400);
     return response.status(statusCode).json({ data: null, error: errorPayload(error) });
   }
@@ -2928,6 +3127,7 @@ app.post('/api/operations/fiscal/documents', requireAuth, (request: Authenticate
 
 app.patch('/api/operations/fiscal/documents/:id', requireAuth, (request: AuthenticatedRequest, response) => {
   if (!fiscalPermission(request, 'edit')) return fiscalForbidden(response, 'Sem permissão para editar documento fiscal.');
+  let transactionStarted = false;
   try {
     const document = fiscalDocumentById(String(request.params.id));
     if (!document) return response.status(404).json({ data: null, error: { message: 'Documento fiscal não encontrado.', code: 'FISCAL_NOT_FOUND' } });
@@ -2939,6 +3139,8 @@ app.patch('/api/operations/fiscal/documents/:id', requireAuth, (request: Authent
     const nextItems = Array.isArray(request.body?.items) ? request.body.items : [];
     validateFiscalLinks(request, String(document.company_id), String(document.store_id), request.body?.customer_id ?? document.customer_id, document.origin_table, document.origin_id, nextItems);
     const timestamp = now();
+    getDatabase().run('BEGIN');
+    transactionStarted = true;
     execute('UPDATE fiscal_documents SET customer_id = ?, customer_name = ?, customer_document = ?, total = ?, discount = ?, notes = ?, updated_at = ? WHERE id = ?', [request.body?.customer_id ?? document.customer_id ?? null, customerName, request.body?.customer_document === undefined ? document.customer_document ?? null : String(request.body.customer_document || '').replace(/\D/g, '') || null, total, request.body?.discount === undefined ? Number(document.discount || 0) : Number(request.body.discount || 0), request.body?.notes === undefined ? document.notes ?? null : String(request.body.notes || '').trim() || null, timestamp, document.id]);
     if (Array.isArray(request.body?.items)) {
       execute('DELETE FROM fiscal_document_items WHERE document_id = ?', [document.id]);
@@ -2949,10 +3151,14 @@ app.patch('/api/operations/fiscal/documents/:id', requireAuth, (request: Authent
       }
     }
     fiscalAudit(request, String(document.company_id), String(document.store_id), String(document.id), 'draft_updated', { changed_fields: Object.keys(request.body || {}).filter((field) => !['items'].includes(field)) }, timestamp);
+    getDatabase().run('COMMIT');
+    transactionStarted = false;
     persistDatabase();
     return response.json({ data: fiscalDetail(String(document.id), request.profile), error: null });
   } catch (error) {
-    return response.status(400).json({ data: null, error: errorPayload(error) });
+    if (transactionStarted) { try { getDatabase().run('ROLLBACK'); } catch { /* rollback best effort */ } }
+    const statusCode = Number((error as { statusCode?: number })?.statusCode || 400);
+    return response.status(statusCode).json({ data: null, error: errorPayload(error) });
   }
 });
 

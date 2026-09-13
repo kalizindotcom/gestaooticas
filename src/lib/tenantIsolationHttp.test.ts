@@ -11,12 +11,15 @@ const masterEmail = 'phase3-master@example.test';
 const masterPassword = 'Phase3Master-2026!';
 const scopedEmail = 'phase3-company-a@example.test';
 const scopedPassword = 'Phase3Scoped-2026!';
+const fiscalViewerEmail = 'phase12-fiscal-viewer@example.test';
+const fiscalViewerPassword = 'Phase12FiscalViewer-2026!';
 
 let child: ChildProcess | undefined;
 let dataDirectory = '';
 let baseUrl = '';
 let masterToken = '';
 let scopedToken = '';
+let fiscalViewerToken = '';
 
 async function freePort() {
   const server = net.createServer();
@@ -44,12 +47,13 @@ async function waitForApi() {
   throw new Error('Servidor HTTP de integração não respondeu ao healthcheck.');
 }
 
-async function api(pathname: string, options: { method?: string; body?: Json; token?: string } = {}): Promise<ApiResult> {
+async function api(pathname: string, options: { method?: string; body?: Json; token?: string; headers?: Record<string, string> } = {}): Promise<ApiResult> {
   const response = await fetch(`${baseUrl}${pathname}`, {
     method: options.method || 'GET',
     headers: {
       ...(options.body === undefined ? {} : { 'content-type': 'application/json' }),
       ...(options.token ? { authorization: `Bearer ${options.token}` } : {}),
+      ...(options.headers || {}),
     },
     body: options.body === undefined ? undefined : JSON.stringify(options.body),
   });
@@ -139,6 +143,21 @@ describe('isolamento HTTP por empresa e loja', () => {
     });
     expect(userResult.status).toBe(201);
     scopedToken = await login(scopedEmail, scopedPassword);
+
+    const fiscalViewerResult = await api('/api/admin/users', {
+      method: 'POST',
+      token: masterToken,
+      body: {
+        email: fiscalViewerEmail,
+        name: 'Visualizador Fiscal',
+        password: fiscalViewerPassword,
+        role: 'user',
+        companies: ['company-a'],
+        stores: ['store-a'],
+      },
+    });
+    expect(fiscalViewerResult.status).toBe(201);
+    fiscalViewerToken = await login(fiscalViewerEmail, fiscalViewerPassword);
   }, 30_000);
 
   afterAll(async () => {
@@ -149,8 +168,8 @@ describe('isolamento HTTP por empresa e loja', () => {
   it('expõe ao master o status formal do schema aplicado', async () => {
     const result = await api('/api/admin/database/migrations', { token: masterToken });
     expect(result.status).toBe(200);
-    expect((result.body.data as { currentVersion: number; targetVersion: number; applied: Array<{ version: number }> })).toMatchObject({ currentVersion: 21, targetVersion: 21 });
-    expect((result.body.data as { applied: Array<{ version: number }> }).applied.map((migration) => migration.version)).toEqual([20, 21]);
+    expect((result.body.data as { currentVersion: number; targetVersion: number; applied: Array<{ version: number }> })).toMatchObject({ currentVersion: 22, targetVersion: 22 });
+    expect((result.body.data as { applied: Array<{ version: number }> }).applied.map((migration) => migration.version)).toEqual([20, 21, 22]);
 
     const scoped = await api('/api/admin/database/migrations', { token: scopedToken });
     expect(scoped.status).toBe(403);
@@ -272,5 +291,83 @@ describe('isolamento HTTP por empresa e loja', () => {
     const masterRead = await api('/api/tables/service_orders?eq[id]=order-b', { token: masterToken });
     expect(masterRead.status).toBe(200);
     expect((masterRead.body.data as Array<{ id: string }>)[0].id).toBe('order-b');
+  });
+
+  it('grava O.S., timeline e financeiro em uma única operação idempotente', async () => {
+    const key = 'phase11-os-idempotency-key';
+    const payload = { company_id: 'company-a', store_id: 'store-a', customer_id: 'customer-a', date: '2026-09-13', delivery_date: '2026-09-20', total: 250, paid_amount: 50, status: 'opened', service_type: 'montagem' };
+    const created = await api('/api/operations/service-orders', { method: 'POST', token: scopedToken, headers: { 'Idempotency-Key': key }, body: payload });
+    expect(created.status).toBe(201);
+    const orderId = String((created.body.data as { id: string }).id);
+    expect(orderId).toBeTruthy();
+
+    const replay = await api('/api/operations/service-orders', { method: 'POST', token: scopedToken, headers: { 'Idempotency-Key': key }, body: payload });
+    expect(replay.status).toBe(200);
+    expect((replay.body.data as { id: string }).id).toBe(orderId);
+
+    const timeline = await api(`/api/tables/service_order_timeline?eq[service_order_id]=${orderId}`, { token: masterToken });
+    expect(timeline.status).toBe(200);
+    expect((timeline.body.data as Array<unknown>).length).toBe(1);
+    const financial = await api(`/api/tables/financial_entries?eq[origin_table]=service_orders&eq[origin_id]=${orderId}`, { token: masterToken });
+    expect(financial.status).toBe(200);
+    expect((financial.body.data as Array<{ amount: number; paid_amount: number }>).length).toBe(1);
+    expect((financial.body.data as Array<{ amount: number; paid_amount: number }>)[0]).toMatchObject({ amount: 250, paid_amount: 50 });
+
+    const invalidUpdate = await api(`/api/operations/service-orders/${orderId}`, { method: 'PATCH', token: scopedToken, body: { customer_id: 'customer-b', total: 300 } });
+    expect(invalidUpdate.status).toBe(403);
+    const unchanged = await api(`/api/tables/service_orders?eq[id]=${orderId}`, { token: masterToken });
+    expect((unchanged.body.data as Array<{ total: number; customer_id: string }>)[0]).toMatchObject({ total: 250, customer_id: 'customer-a' });
+  });
+
+  it('faz rollback dos efeitos de O.S. quando ocorre falha intermediária', async () => {
+    const beforeOrders = await api('/api/tables/service_orders', { token: masterToken });
+    const beforeFinancial = await api('/api/tables/financial_entries', { token: masterToken });
+    const failed = await api('/api/operations/service-orders', {
+      method: 'POST',
+      token: scopedToken,
+      headers: { 'Idempotency-Key': 'phase11-os-rollback-key', 'x-test-fail-after-os': '1' },
+      body: { company_id: 'company-a', store_id: 'store-a', customer_id: 'customer-a', date: '2026-09-13', total: 99, paid_amount: 0 },
+    });
+    expect(failed.status).toBe(500);
+    const afterOrders = await api('/api/tables/service_orders', { token: masterToken });
+    const afterFinancial = await api('/api/tables/financial_entries', { token: masterToken });
+    expect((afterOrders.body.data as Array<unknown>).length).toBe((beforeOrders.body.data as Array<unknown>).length);
+    expect((afterFinancial.body.data as Array<unknown>).length).toBe((beforeFinancial.body.data as Array<unknown>).length);
+  });
+
+  it('permite consulta fiscal ao perfil de leitura, mas bloqueia configuração e emissão', async () => {
+    const list = await api('/api/operations/fiscal/documents?company_id=company-a&store_id=store-a', { token: fiscalViewerToken });
+    expect(list.status).toBe(200);
+    const capabilities = await api('/api/operations/fiscal/capabilities?company_id=company-a&store_id=store-a', { token: fiscalViewerToken });
+    expect(capabilities.status).toBe(200);
+    expect(capabilities.body.data).toMatchObject({ simulation_enabled: true, external_transmission_enabled: false, production_enabled: false });
+    const create = await api('/api/operations/fiscal/documents', {
+      method: 'POST',
+      token: fiscalViewerToken,
+      body: { company_id: 'company-a', store_id: 'store-a', type: 'NFC-e', operation: 'manual', customer_name: 'Teste fiscal', total: 10 },
+    });
+    expect(create.status).toBe(403);
+    const configure = await api('/api/operations/fiscal/config', {
+      method: 'PUT',
+      token: fiscalViewerToken,
+      body: { company_id: 'company-a', store_id: 'store-a', environment: 'homologacao', provider: 'local-simulation' },
+    });
+    expect(configure.status).toBe(403);
+
+    const masterConfig = await api('/api/operations/fiscal/config', {
+      method: 'PUT',
+      token: masterToken,
+      body: { company_id: 'company-a', store_id: 'store-a', environment: 'producao', provider: 'local-simulation' },
+    });
+    expect(masterConfig.status).toBe(200);
+    const draft = await api('/api/operations/fiscal/documents', {
+      method: 'POST',
+      token: masterToken,
+      body: { company_id: 'company-a', store_id: 'store-a', type: 'NFC-e', operation: 'manual', customer_name: 'Teste produção bloqueada', total: 10, idempotency_key: 'phase12-production-lock' },
+    });
+    expect(draft.status).toBe(201);
+    const transmission = await api(`/api/operations/fiscal/documents/${String((draft.body.data as { document: { id: string } }).document.id)}/transmit`, { method: 'POST', token: masterToken, body: {} });
+    expect(transmission.status).toBe(409);
+    expect(transmission.body.error?.code).toBe('FISCAL_PRODUCTION_LOCKED');
   });
 });

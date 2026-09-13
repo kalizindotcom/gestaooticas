@@ -28,6 +28,7 @@ const backupRoot = getBackupDirectory();
 const settingsId = 'default';
 const backupFormatVersion = 1;
 const driveScope = 'https://www.googleapis.com/auth/drive.file';
+let schedulerLastRunAt: string | null = null;
 const integrityTables = [
   'companies', 'stores', 'roles', 'permissions', 'role_permissions', 'profiles', 'user_permissions', 'employees', 'customers',
   'laboratories', 'professionals', 'appointments', 'products', 'product_stock', 'product_movements', 'product_categories',
@@ -497,6 +498,40 @@ export async function listGoogleDriveBackups(redirectUri?: string) {
   return payload.files || [];
 }
 
+async function deleteGoogleDriveBackup(fileId: string, redirectUri?: string) {
+  const response = await driveFetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}`, { method: 'DELETE' }, redirectUri);
+  if (!response.ok && response.status !== 404) {
+    const payload = await response.json().catch(() => ({})) as GoogleApiPayload;
+    throw new Error(googleErrorMessage(payload, `Não foi possível remover o backup remoto (${response.status}).`));
+  }
+}
+
+function remoteBackupPeriod(name: string) {
+  const match = String(name || '').match(/^gestao-oticas-(daily|weekly|monthly)-/);
+  return match?.[1] as 'daily' | 'weekly' | 'monthly' | undefined;
+}
+
+async function pruneRemoteBackups(settings: BackupSettings, redirectUri?: string) {
+  if (!settings.upload_to_drive || !settings.google_account_email) return { deleted: 0, retained: 0 };
+  const files = await listGoogleDriveBackups(redirectUri);
+  const retention: Record<'daily' | 'weekly' | 'monthly', number> = {
+    daily: settings.retention_daily,
+    weekly: settings.retention_weekly,
+    monthly: settings.retention_monthly,
+  };
+  let deleted = 0;
+  for (const period of Object.keys(retention) as Array<'daily' | 'weekly' | 'monthly'>) {
+    const candidates = files
+      .filter((file) => remoteBackupPeriod(String(file.name || '')) === period)
+      .sort((left, right) => String(right.createdTime || right.modifiedTime || '').localeCompare(String(left.createdTime || left.modifiedTime || '')));
+    for (const file of candidates.slice(retention[period])) {
+      await deleteGoogleDriveBackup(file.id, redirectUri);
+      deleted += 1;
+    }
+  }
+  return { deleted, retained: files.length - deleted };
+}
+
 export async function downloadGoogleDriveBackup(fileId: string, redirectUri?: string) {
   const response = await driveFetch(`https://www.googleapis.com/drive/v3/files/${encodeURIComponent(fileId)}?alt=media`, {}, redirectUri);
   if (!response.ok || !response.body) throw new Error(`Não foi possível baixar o backup do Drive (${response.status}).`);
@@ -533,6 +568,15 @@ export async function createBackup(input: { type?: string; label?: string; perio
         errorMessage = error instanceof Error ? error.message : String(error);
         addEvent(jobId, 'drive_failed', errorMessage, {}, 'warning');
       }
+    }
+    try {
+      const remoteRetention = await pruneRemoteBackups(getBackupSettings(), input.redirectUri);
+      if (remoteRetention.deleted > 0) addEvent(jobId, 'drive_retention', 'Retenção remota aplicada.', remoteRetention);
+    } catch (error) {
+      const retentionError = error instanceof Error ? error.message : String(error);
+      status = 'partial';
+      errorMessage = [errorMessage, `Retenção remota: ${retentionError}`].filter(Boolean).join(' ');
+      addEvent(jobId, 'drive_retention_failed', retentionError, {}, 'warning');
     }
     updateJob(jobId, { status, source, archive_name: archive.archiveName, local_path: archive.archivePath, size_bytes: archive.sizeBytes, sha256: archive.sha256, manifest_json: archive.manifest, drive_file_id: drive?.id || null, drive_web_url: drive?.webViewLink || null, error_message: errorMessage, completed_at: now() });
     addEvent(jobId, 'completed', status === 'completed' ? 'Backup concluído.' : 'Backup local concluído com falha parcial no Google Drive.', { size_bytes: archive.sizeBytes }, status === 'completed' ? 'info' : 'warning');
@@ -572,10 +616,23 @@ export function listBackupJobs(filters: { status?: string; limit?: number; offse
 export function getBackupOperationalStatus() {
   const settings = getBackupSettings();
   const latest = listBackupJobs({ status: 'all', limit: 1 }).rows[0];
+  const successful = selectRows("SELECT completed_at FROM backup_jobs WHERE status IN ('completed', 'partial') AND completed_at IS NOT NULL ORDER BY completed_at DESC LIMIT 1")[0];
+  const lastSuccessfulAt = successful?.completed_at ? String(successful.completed_at) : null;
+  const cadenceHours = settings.daily_enabled
+    ? (24 / Math.max(1, settings.daily_count))
+    : settings.weekly_enabled
+      ? (168 / Math.max(1, settings.weekly_count))
+      : settings.monthly_enabled
+        ? (744 / Math.max(1, settings.monthly_count))
+        : null;
+  const staleAfterHours = cadenceHours === null ? null : cadenceHours + (settings.daily_enabled ? 6 : 24);
+  const ageHours = lastSuccessfulAt ? Math.max(0, (Date.now() - new Date(lastSuccessfulAt).getTime()) / 3_600_000) : null;
+  const schedulerRunAt = schedulerLastRunAt || settings.last_scheduler_tick;
   return {
     enabled: settings.enabled,
     scheduler: {
       last_tick_at: settings.last_scheduler_tick,
+      last_run_at: schedulerRunAt,
       timezone: settings.timezone,
       schedule_hour: settings.schedule_hour,
       schedule_minute: settings.schedule_minute,
@@ -588,6 +645,20 @@ export function getBackupOperationalStatus() {
       completed_at: latest.completed_at,
       size_bytes: latest.size_bytes,
     } : null,
+    retention: {
+      local_max: settings.max_local_backups,
+      remote_daily: settings.retention_daily,
+      remote_weekly: settings.retention_weekly,
+      remote_monthly: settings.retention_monthly,
+    },
+    alerts: {
+      backup_stale: Boolean(settings.enabled && staleAfterHours !== null && (ageHours === null || ageHours > staleAfterHours)),
+      scheduler_stale: Boolean(settings.enabled && (!schedulerRunAt || Date.now() - new Date(schedulerRunAt).getTime() > 2 * 3_600_000)),
+      latest_failed: Boolean(latest && ['failed', 'partial'].includes(String(latest.status))),
+      last_successful_at: lastSuccessfulAt,
+      age_hours: ageHours === null ? null : Number(ageHours.toFixed(2)),
+      stale_after_hours: staleAfterHours === null ? null : Number(staleAfterHours.toFixed(2)),
+    },
   };
 }
 
@@ -719,6 +790,7 @@ export async function runBackupScheduler(redirectUri?: string) {
   const settings = getBackupSettings();
   if (!settings.enabled) return null;
   const current = new Date();
+  schedulerLastRunAt = current.toISOString();
   const parts = zonedParts(current, settings.timezone);
   const minuteMatches = parts.minute === settings.schedule_minute;
   if (!minuteMatches) return null;

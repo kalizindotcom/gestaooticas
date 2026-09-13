@@ -2,7 +2,7 @@
 
 ## Objetivo
 
-Este runbook descreve os controles operacionais introduzidos nas Fases 6, 7 e 8. O objetivo é detectar falhas rapidamente, bloquear regressões antes da publicação e comprovar que os backups podem ser inspecionados, importados e restaurados com segurança.
+Este runbook descreve os controles operacionais introduzidos nas Fases 6 a 12. O objetivo é detectar falhas rapidamente, bloquear regressões antes da publicação, manter a persistência íntegra e comprovar que backups, O.S. e documentos fiscais são processados sem efeitos parciais ou transmissão externa indevida.
 
 > **Regra operacional:** o healthcheck público confirma apenas que a API e o banco SQLite estão disponíveis. Métricas detalhadas, estado de backups e o último restore ficam protegidos por autenticação do administrador master.
 
@@ -18,6 +18,11 @@ Este runbook descreve os controles operacionais introduzidos nas Fases 6, 7 e 8.
 | Smoke de continuidade | `npm run smoke:continuity` | Exercitar backup, download, inspeção, importação, restore pendente e retomada após restart. |
 | Quality Gate | `.github/workflows/quality.yml` | Bloquear merge/publicação quando typecheck crítico ou completo, lint, testes, build ou smoke falhar. |
 | Monitoramento externo | `.github/workflows/production-health.yml` | Consultar a URL pública a cada 15 minutos e gerar uma execução falha quando a aplicação estiver indisponível. |
+| Lock de persistência | `server/persistenceLock.ts` e `server/db.ts` | Serializar a troca atômica do SQLite, aplicar `fsync` e detectar contenção. |
+| Retenção remota | `server/backupService.ts` | Manter limites distintos para backups diários, semanais e mensais no Google Drive. |
+| Drill de DR | `.github/workflows/backup-drill.yml` | Executar semanalmente backup, inspeção, importação, restore pendente e retomada em diretório isolado. |
+| O.S. transacional | `/api/operations/service-orders` | Gravar O.S., timeline e financeiro juntos, com idempotência por `Idempotency-Key`. |
+| Capacidades fiscais | `/api/operations/fiscal/capabilities` | Declarar que somente simulação local está habilitada e que produção/transmissão externa estão bloqueadas. |
 
 ## Diagnóstico de uma indisponibilidade
 
@@ -55,6 +60,30 @@ npm run smoke:continuity
 
 O `typecheck:ci` cobre o backend crítico utilizado em produção. O `typecheck` cobre o projeto completo e agora é bloqueante. O lint global continua separado do `lint:ci` porque contém dívida histórica fora do escopo destas fases; o gate bloqueante deve permanecer restrito ao conjunto explicitamente validado até que a dívida seja eliminada.
 
+## Persistência e concorrência
+
+O processo de API deve permanecer único para o volume SQLite atual. A persistência exporta o banco para um arquivo temporário com modo restrito, faz `fsync`, troca o arquivo por rename atômico e libera o lock exclusivo. O contador e a última duração podem ser consultados por um administrador master em `GET /api/admin/metrics`, no campo `data.persistence`.
+
+O lock evita dois processos trocando o mesmo arquivo ao mesmo tempo, mas não torna duas cópias independentes do `sql.js` uma arquitetura multiwriter. Não habilite réplicas de escrita ou múltiplos workers no mesmo volume; os gatilhos e o plano de migração estão registrados em [`docs/persistence-adr.md`](persistence-adr.md).
+
+## Retenção e recuperação de desastre
+
+Backups locais são limitados por `max_local_backups`. Quando o Google Drive está conectado, a poda remota classifica arquivos pelos prefixos `daily`, `weekly` e `monthly` e aplica respectivamente `retention_daily`, `retention_weekly` e `retention_monthly`. Falha na poda não remove o arquivo e registra um evento de warning; o job fica `partial` para tornar o problema visível.
+
+O workflow **Backup DR Drill** roda semanalmente em banco e diretório temporários. Ele não lê, baixa ou restaura dados de produção. O drill deve permanecer verde; uma falha bloqueia a confiança operacional no caminho de recuperação e deve ser investigada antes de uma mudança de infraestrutura.
+
+## O.S. e operações compostas
+
+Criações e edições do formulário usam `POST /api/operations/service-orders` e `PATCH /api/operations/service-orders/:id`. O backend valida empresa, loja, cliente, técnico, laboratório, profissional, receita e produto antes da escrita. A transação inclui a O.S., a timeline e o lançamento financeiro vinculado. Repetição da mesma criação com a mesma `Idempotency-Key` devolve a O.S. original sem duplicar efeitos.
+
+Exclusão usa o endpoint dedicado e remove O.S., timeline e lançamentos originados juntos. A falha de uma etapa faz rollback de todas as etapas anteriores. O endpoint genérico continua disponível para compatibilidade administrativa, mas operações compostas devem usar os endpoints dedicados.
+
+## Fiscal: simulação versus transmissão oficial
+
+O módulo fiscal persiste rascunhos, itens, auditoria e eventos. O adapter disponível é `local-simulation`; ele nunca chama SEFAZ, prefeitura ou outro provedor externo. Mesmo que uma configuração seja marcada como `producao`, a transmissão retorna `FISCAL_PRODUCTION_LOCKED`. Cancelamento, correção e inutilização exigem autorização real e permanecem bloqueados enquanto não houver adapter oficial homologado.
+
+O endpoint de capacidades informa `simulation_enabled: true`, `external_transmission_enabled: false` e `production_enabled: false` por loja. Certificados, CSCs, tokens e senhas não devem ser colocados na interface ou no banco de configurações comuns; qualquer futura integração oficial deve passar por revisão própria de credenciais, homologação, idempotência e autorização.
+
 ## Resposta a falhas do Quality Gate
 
 Uma falha de typecheck ou lint deve ser corrigida antes do deploy. Uma falha de teste deve ser reproduzida localmente com o arquivo específico. Uma falha de build deve ser investigada antes de qualquer enqueue no Coolify. Uma falha de smoke indica regressão no boot, autenticação, autorização, backup ou continuidade e deve bloquear a publicação.
@@ -63,7 +92,7 @@ Falhas do workflow **Production Health** indicam indisponibilidade observada ext
 
 ## Limites conhecidos
 
-O healthcheck não testa uma operação autenticada nem uma consulta de negócio. O monitoramento do GitHub informa falha por meio do histórico e das notificações da conta, não substituindo uma política de plantão. O bundle frontend ainda ultrapassa o limite de aviso de 500 KB do Vite; isso é uma otimização futura e não um erro bloqueante de funcionalidade.
+O healthcheck não testa uma operação autenticada nem uma consulta de negócio. O monitoramento do GitHub informa falha por meio do histórico e das notificações da conta, não substituindo uma política de plantão. O drill de DR valida o caminho de recuperação em ambiente isolado, não a restauração de um backup real de produção. O bundle frontend ainda ultrapassa o limite de aviso de 500 KB do Vite; isso é uma otimização futura e não um erro bloqueante de funcionalidade.
 
 ## Referências
 

@@ -1,0 +1,33 @@
+name: Backup DR Drill
+
+on:
+  schedule:
+    - cron: '0 5 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: backup-drill
+  cancel-in-progress: false
+
+jobs:
+  isolated-restore:
+    name: Isolated backup and restore drill
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - name: Install dependencies
+        run: npm ci
+      - name: Build
+        run: npm run build
+      - name: Run isolated continuity drill
+        run: npm run smoke:continuity

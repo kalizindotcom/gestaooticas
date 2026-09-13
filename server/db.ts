@@ -6,6 +6,7 @@ import { fileURLToPath } from 'node:url';
 import initSqlJs, { type Database, type SqlJsStatic } from 'sql.js';
 import bcrypt from 'bcryptjs';
 import { CURRENT_SCHEMA_VERSION, runMigrations } from './migrations.js';
+import { withExclusiveFileLock } from './persistenceLock.js';
 
 const require = createRequire(import.meta.url);
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -13,10 +14,17 @@ const dataDir = path.resolve(process.env.OTICA_DATA_DIR || path.join(projectRoot
 const databasePath = path.join(dataDir, 'otica-nordestina.sqlite');
 const backupDir = path.join(dataDir, 'backups');
 const restorePendingPath = path.join(backupDir, 'restore-pending.json');
+const databaseLockPath = `${databasePath}.lock`;
 const SCHEMA_VERSION = String(CURRENT_SCHEMA_VERSION);
 
 let SQL: SqlJsStatic;
 let database: Database;
+const persistenceStats = {
+  writes: 0,
+  lastPersistAt: null as string | null,
+  lastPersistDurationMs: null as number | null,
+  lockTimeouts: 0,
+};
 
 type SqlParameter = number | string | Uint8Array | null;
 
@@ -661,15 +669,49 @@ function createStartupBackup() {
 
 export function persistDatabase() {
   if (!database) return;
-  const binary = database.export();
-  const tempPath = `${databasePath}.tmp`;
-  fs.writeFileSync(tempPath, Buffer.from(binary));
+  const startedAt = Date.now();
   try {
-    fs.renameSync(tempPath, databasePath);
-  } catch {
-    fs.copyFileSync(tempPath, databasePath);
-    fs.rmSync(tempPath, { force: true });
+    withExclusiveFileLock(databaseLockPath, () => {
+      const binary = database.export();
+      const tempPath = `${databasePath}.tmp`;
+      const descriptor = fs.openSync(tempPath, 'w', 0o600);
+      try {
+        fs.writeFileSync(descriptor, Buffer.from(binary));
+        fs.fsyncSync(descriptor);
+      } finally {
+        fs.closeSync(descriptor);
+      }
+      try {
+        fs.renameSync(tempPath, databasePath);
+      } catch {
+        fs.copyFileSync(tempPath, databasePath);
+        fs.rmSync(tempPath, { force: true });
+      }
+      try {
+        const directoryDescriptor = fs.openSync(dataDir, 'r');
+        try { fs.fsyncSync(directoryDescriptor); } finally { fs.closeSync(directoryDescriptor); }
+      } catch {
+        // Alguns sistemas de arquivos não permitem fsync no descritor de diretório.
+      }
+    });
+    persistenceStats.writes += 1;
+    persistenceStats.lastPersistAt = now();
+    persistenceStats.lastPersistDurationMs = Date.now() - startedAt;
+  } catch (error) {
+    if ((error as { code?: string }).code === 'DATABASE_WRITE_LOCK_TIMEOUT') persistenceStats.lockTimeouts += 1;
+    throw error;
   }
+}
+
+export function getPersistenceStatus() {
+  return {
+    mode: 'sql.js-single-process-atomic-file',
+    lock: 'exclusive-file-lock',
+    writes: persistenceStats.writes,
+    last_persist_at: persistenceStats.lastPersistAt,
+    last_persist_duration_ms: persistenceStats.lastPersistDurationMs,
+    lock_timeouts: persistenceStats.lockTimeouts,
+  };
 }
 
 export function createDatabaseBackup(label = 'manual') {
