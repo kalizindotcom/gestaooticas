@@ -553,7 +553,9 @@ function profileStores(profile?: Record<string, unknown>) {
 }
 
 function relatedScope(table: string, row: Record<string, unknown>) {
-  if (row.company_id || row.store_id) return { companyId: row.company_id as string | undefined, storeId: row.store_id as string | undefined };
+  if (row.company_id || (row.store_id && !['product_stock', 'product_movements'].includes(table))) {
+    return { companyId: row.company_id as string | undefined, storeId: row.store_id as string | undefined };
+  }
   if (table === 'product_stock' || table === 'product_movements') {
     const product = selectRows('SELECT company_id FROM products WHERE id = ? LIMIT 1', [row.product_id])[0];
     return { companyId: product?.company_id as string | undefined, storeId: row.store_id as string | undefined };
@@ -579,6 +581,203 @@ function relatedScope(table: string, row: Record<string, unknown>) {
     return { companyId: account?.company_id as string | undefined, storeId: undefined };
   }
   return { companyId: undefined, storeId: undefined };
+}
+
+type TenantReferencePolicy = 'company' | 'store';
+
+function tenantError(message: string, code: string, statusCode = 403) {
+  return Object.assign(new Error(message), { code, statusCode });
+}
+
+function stringId(value: unknown) {
+  const normalized = String(value ?? '').trim();
+  return normalized || null;
+}
+
+function assertCompanyScope(companyIdValue: unknown, profile?: Record<string, unknown>) {
+  const companyId = stringId(companyIdValue);
+  if (!companyId || selectRows('SELECT id FROM companies WHERE id = ? LIMIT 1', [companyId]).length === 0) {
+    throw tenantError('Empresa inválida.', 'TENANT_COMPANY_INVALID', 400);
+  }
+  if (!isMaster(profile) && !profileCompanies(profile).includes(companyId)) {
+    throw tenantError('Referência fora do escopo permitido.', 'TENANT_SCOPE_FORBIDDEN');
+  }
+  return companyId;
+}
+
+function assertCompanyStoreScope(companyIdValue: unknown, storeIdValue: unknown, profile?: Record<string, unknown>) {
+  const companyId = assertCompanyScope(companyIdValue, profile);
+  const storeId = stringId(storeIdValue);
+  const store = storeId ? selectRows('SELECT id, company_id FROM stores WHERE id = ? LIMIT 1', [storeId])[0] : undefined;
+  if (!store || String(store.company_id) !== companyId) {
+    throw tenantError('Empresa ou loja inválida.', 'TENANT_STORE_INVALID', 400);
+  }
+  if (!isMaster(profile) && profileStores(profile).length > 0 && !profileStores(profile).includes(storeId as string)) {
+    throw tenantError('Referência fora do escopo permitido.', 'TENANT_SCOPE_FORBIDDEN');
+  }
+  return { companyId, storeId: storeId as string, store };
+}
+
+function referenceRow(table: string, id: unknown) {
+  const referenceId = stringId(id);
+  if (!referenceId || !allowedTables.has(table)) return undefined;
+  return selectRows(`SELECT * FROM ${safeTable(table)} WHERE id = ? LIMIT 1`, [referenceId])[0];
+}
+
+function assertTenantReference(
+  table: string,
+  id: unknown,
+  companyIdValue: unknown,
+  storeIdValue: unknown,
+  label: string,
+  policy: TenantReferencePolicy = 'company',
+) {
+  const row = referenceRow(table, id);
+  if (!row) throw tenantError(`${label} inválido.`, 'TENANT_REFERENCE_INVALID', 400);
+  const expectedCompanyId = stringId(companyIdValue);
+  const expectedStoreId = stringId(storeIdValue);
+  const scope = relatedScope(table, row);
+  const actualCompanyId = stringId(row.company_id || scope.companyId);
+  const actualStoreId = stringId(row.store_id || scope.storeId);
+  if (!expectedCompanyId || actualCompanyId !== expectedCompanyId || (policy === 'store' && expectedStoreId && actualStoreId !== expectedStoreId)) {
+    throw tenantError('Referência fora do escopo permitido.', 'TENANT_SCOPE_FORBIDDEN');
+  }
+  return row;
+}
+
+function assertOptionalTenantReference(
+  table: string,
+  id: unknown,
+  companyIdValue: unknown,
+  storeIdValue: unknown,
+  label: string,
+  policy: TenantReferencePolicy = 'company',
+) {
+  if (stringId(id)) return assertTenantReference(table, id, companyIdValue, storeIdValue, label, policy);
+  return undefined;
+}
+
+function assertOriginReference(originTableValue: unknown, originIdValue: unknown, companyId: string, storeId: string | null, label = 'Origem') {
+  const originTable = stringId(originTableValue);
+  const originId = stringId(originIdValue);
+  if (!originTable && !originId) return;
+  if (!originTable || !originId) throw tenantError(`${label} inválida.`, 'TENANT_ORIGIN_INVALID', 400);
+  const allowedOriginTables = new Set(['sales', 'service_orders', 'customers', 'fixed_cost_payments', 'financial_entries', 'financial_transfers', 'financial_reversal', 'credit_book']);
+  if (!allowedOriginTables.has(originTable)) throw tenantError(`${label} inválida.`, 'TENANT_ORIGIN_INVALID', 400);
+  if (originTable === 'credit_book') return;
+  const referenceTable = originTable === 'financial_reversal' ? 'financial_entries' : originTable;
+  const policy: TenantReferencePolicy = ['sales', 'service_orders', 'customers', 'fixed_cost_payments'].includes(referenceTable) ? 'store' : 'company';
+  return assertTenantReference(referenceTable, originId, companyId, storeId, label, policy);
+}
+
+function validateTenantLinks(table: string, row: Record<string, unknown>, profile?: Record<string, unknown>) {
+  const companyId = stringId(row.company_id);
+  const storeId = stringId(row.store_id);
+  const companyScopedTables = new Set([
+    'laboratories', 'professionals', 'products', 'product_categories', 'product_brands', 'product_images',
+    'product_audits', 'bank_accounts', 'financial_categories', 'stores',
+  ]);
+  const storeScopedTables = new Set([
+    'employees', 'customers', 'appointments', 'sales', 'service_orders', 'cash_registers', 'fixed_costs', 'fixed_cost_payments',
+    'financial_budgets', 'financial_daily_closings', 'fiscal_configs', 'fiscal_documents', 'fiscal_xml_imports', 'prescriptions',
+  ]);
+  const optionalStoreTables = new Set(['financial_entries', 'financial_installment_groups', 'financial_approvals', 'financial_card_settlements']);
+  if (companyScopedTables.has(table)) assertCompanyScope(companyId, profile);
+  if (storeScopedTables.has(table)) assertCompanyStoreScope(companyId, storeId, profile);
+  if (optionalStoreTables.has(table)) {
+    assertCompanyScope(companyId, profile);
+    if (storeId) assertCompanyStoreScope(companyId, storeId, profile);
+  }
+
+  if (table === 'customers') assertOptionalTenantReference('employees', row.preferred_seller_id, companyId, storeId, 'Vendedor preferencial', 'store');
+  if (table === 'prescriptions') {
+    assertTenantReference('customers', row.customer_id, companyId, storeId, 'Cliente da receita', 'store');
+    assertOptionalTenantReference('professionals', row.professional_id, companyId, null, 'Profissional da receita');
+  }
+  if (table === 'appointments') {
+    assertOptionalTenantReference('customers', row.customer_id, companyId, storeId, 'Cliente', 'store');
+    assertOptionalTenantReference('professionals', row.professional_id, companyId, storeId, 'Profissional');
+  }
+  if (table === 'product_stock' || table === 'product_movements') {
+    assertCompanyStoreScope(row.company_id || relatedScope(table, row).companyId, storeId, profile);
+    assertTenantReference('products', row.product_id, row.company_id || relatedScope(table, row).companyId, null, 'Produto');
+  }
+  if (table === 'product_images' || table === 'product_audits') {
+    assertTenantReference('products', row.product_id, companyId, null, 'Produto');
+  }
+  if (table === 'sale_items') {
+    const sale = referenceRow('sales', row.sale_id);
+    if (!sale) throw tenantError('Venda inválida.', 'TENANT_REFERENCE_INVALID', 400);
+    assertTenantReference('sales', row.sale_id, sale.company_id, sale.store_id, 'Venda', 'store');
+    assertOptionalTenantReference('products', row.product_id, sale.company_id, null, 'Produto');
+  }
+  if (table === 'sales') {
+    assertOptionalTenantReference('customers', row.customer_id, companyId, storeId, 'Cliente', 'store');
+    assertOptionalTenantReference('employees', row.seller_id, companyId, storeId, 'Vendedor', 'store');
+    const order = assertOptionalTenantReference('service_orders', row.service_order_id, companyId, storeId, 'O.S. vinculada', 'store');
+    if (order && String(order.status || '') === 'cancelled') throw tenantError('A O.S. cancelada não pode ser vinculada à venda.', 'SERVICE_ORDER_CANCELLED', 409);
+  }
+  if (table === 'service_orders') {
+    assertTenantReference('customers', row.customer_id, companyId, storeId, 'Cliente', 'store');
+    assertOptionalTenantReference('employees', row.technician_id, companyId, storeId, 'Técnico', 'store');
+    assertOptionalTenantReference('laboratories', row.lab_id, companyId, storeId, 'Laboratório');
+    assertOptionalTenantReference('prescriptions', row.prescription_id, companyId, storeId, 'Receita', 'store');
+    assertOptionalTenantReference('professionals', row.prescription_professional_id, companyId, storeId, 'Profissional da receita');
+    assertOptionalTenantReference('products', row.product_id, companyId, null, 'Produto');
+  }
+  if (table === 'service_order_timeline') {
+    const order = referenceRow('service_orders', row.service_order_id);
+    if (!order) throw tenantError('O.S. vinculada inválida.', 'TENANT_REFERENCE_INVALID', 400);
+    assertTenantReference('service_orders', row.service_order_id, order.company_id, order.store_id, 'O.S. vinculada', 'store');
+  }
+  if (table === 'cash_register_movements') {
+    const register = referenceRow('cash_registers', row.cash_register_id);
+    if (!register) throw tenantError('Caixa inválido.', 'TENANT_REFERENCE_INVALID', 400);
+    assertTenantReference('cash_registers', row.cash_register_id, register.company_id, register.store_id, 'Caixa', 'store');
+    assertOriginReference(row.reference_table, row.reference_id, String(register.company_id), String(register.store_id), 'Origem do movimento');
+  }
+  if (table === 'financial_entries') {
+    assertOptionalTenantReference('customers', row.customer_id, companyId, storeId, 'Cliente', 'store');
+    assertOptionalTenantReference('financial_categories', row.category_id, companyId, null, 'Categoria financeira');
+    assertOptionalTenantReference('financial_installment_groups', row.installment_group_id, companyId, storeId, 'Grupo de parcelas', 'store');
+    assertOptionalTenantReference('financial_entries', row.recurrence_source_id, companyId, null, 'Origem da recorrência');
+    assertOriginReference(row.origin_table, row.origin_id, String(companyId), storeId, 'Origem financeira');
+  }
+  if (table === 'fixed_costs') assertOptionalTenantReference('financial_categories', row.category_id, companyId, null, 'Categoria financeira');
+  if (table === 'fixed_cost_payments') {
+    const cost = assertTenantReference('fixed_costs', row.fixed_cost_id, companyId, storeId, 'Custo fixo', 'store');
+    if (row.company_id && String(cost.company_id) !== String(row.company_id)) throw tenantError('Referência fora do escopo permitido.', 'TENANT_SCOPE_FORBIDDEN');
+    assertOptionalTenantReference('financial_entries', row.financial_entry_id, companyId, storeId, 'Lançamento financeiro', 'store');
+  }
+  if (table === 'financial_budgets') assertOptionalTenantReference('financial_categories', row.category_id, companyId, null, 'Categoria financeira');
+  if (table === 'financial_installment_groups') assertOptionalTenantReference('stores', storeId, companyId, null, 'Loja');
+  if (table === 'financial_approvals') {
+    const entry = referenceRow('financial_entries', row.entry_id);
+    if (!entry) throw tenantError('Lançamento financeiro inválido.', 'TENANT_REFERENCE_INVALID', 400);
+    assertTenantReference('financial_entries', row.entry_id, entry.company_id, entry.store_id, 'Lançamento financeiro', 'store');
+  }
+  if (table === 'financial_card_settlements') {
+    assertOptionalTenantReference('financial_entries', row.entry_id, companyId, storeId, 'Lançamento financeiro', 'store');
+    assertOptionalTenantReference('sales', row.sale_id, companyId, storeId, 'Venda', 'store');
+  }
+  if (table === 'financial_transfers') {
+    assertOptionalTenantReference('stores', row.from_store_id, companyId, null, 'Loja de origem');
+    assertOptionalTenantReference('stores', row.to_store_id, companyId, null, 'Loja de destino');
+    assertOptionalTenantReference('cash_registers', row.from_cash_register_id, companyId, row.from_store_id, 'Caixa de origem', 'store');
+    assertOptionalTenantReference('cash_registers', row.to_cash_register_id, companyId, row.to_store_id, 'Caixa de destino', 'store');
+    assertOptionalTenantReference('bank_accounts', row.from_bank_account_id, companyId, null, 'Conta bancária de origem');
+    assertOptionalTenantReference('bank_accounts', row.to_bank_account_id, companyId, null, 'Conta bancária de destino');
+  }
+  if (table === 'bank_reconciliations') assertTenantReference('bank_accounts', row.bank_account_id, companyId, null, 'Conta bancária');
+  if (table === 'bank_transactions') {
+    const account = assertTenantReference('bank_accounts', row.bank_account_id, relatedScope(table, row).companyId, null, 'Conta bancária');
+    assertOptionalTenantReference('bank_reconciliations', row.reconciliation_id, account.company_id, null, 'Reconciliação bancária');
+    assertOptionalTenantReference('financial_entries', row.matched_entry_id, account.company_id, null, 'Lançamento conciliado');
+  }
+  if (table === 'fiscal_documents') {
+    assertOptionalTenantReference('customers', row.customer_id, companyId, storeId, 'Cliente', 'store');
+    assertOriginReference(row.origin_table, row.origin_id, String(companyId), storeId, 'Origem fiscal');
+  }
 }
 
 function rowInScope(table: string, row: Record<string, unknown>, profile?: Record<string, unknown>) {
@@ -692,8 +891,9 @@ function scopeInput(table: string, row: Record<string, unknown>, profile?: Recor
 
 function errorPayload(error: unknown) {
   const message = error instanceof Error ? error.message : String(error);
+  const typedError = error as { code?: unknown; statusCode?: unknown };
   const isUnique = /unique|constraint failed/i.test(message);
-  return { message: isUnique ? 'Registro duplicado.' : message, code: isUnique ? '23505' : 'LOCAL_DB_ERROR' };
+  return { message: isUnique ? 'Registro duplicado.' : message, code: isUnique ? '23505' : String(typedError?.code || 'LOCAL_DB_ERROR') };
 }
 
 app.get('/api/health', (_request, response) => {
@@ -1324,15 +1524,16 @@ app.post('/api/operations/sales', requireAuth, (request: AuthenticatedRequest, r
     const storeId = String(saleData.store_id || '');
     const customerId = saleData.customer_id ? String(saleData.customer_id) : null;
     if (!companyId || !storeId || rawItems.length === 0) return response.status(400).json({ data: null, error: { message: 'Empresa, loja e itens são obrigatórios.' } });
-    const store = selectRows('SELECT id, name, company_id FROM stores WHERE id = ? LIMIT 1', [storeId])[0];
-    if (!store || String(store.company_id) !== companyId) return response.status(400).json({ data: null, error: { message: 'Loja inválida para a empresa informada.' } });
-    if (!rowInScope('sales', { company_id: companyId, store_id: storeId }, request.profile)) return response.status(403).json({ data: null, error: { message: 'Venda fora do seu escopo.', code: '403' } });
-    const customer = customerId ? selectRows('SELECT id, name, company_id FROM customers WHERE id = ? LIMIT 1', [customerId])[0] : undefined;
-    if (customerId && (!customer || String(customer.company_id) !== companyId)) return response.status(400).json({ data: null, error: { message: 'Cliente inválido para a empresa informada.' } });
+    const { store } = assertCompanyStoreScope(companyId, storeId, request.profile);
+    const customer = customerId ? assertTenantReference('customers', customerId, companyId, storeId, 'Cliente', 'store') : undefined;
+    const sellerId = saleData.seller_id ? String(saleData.seller_id) : null;
+    if (sellerId) assertTenantReference('employees', sellerId, companyId, storeId, 'Vendedor', 'store');
     const guestName = saleData.guest_name ? String(saleData.guest_name).trim().slice(0, 160) : null;
     const serviceOrderId = saleData.service_order_id ? String(saleData.service_order_id) : null;
     if (!customerId && !guestName) return response.status(400).json({ data: null, error: { message: 'Informe o nome do cliente avulso.' } });
     if (!customerId && serviceOrderId) return response.status(400).json({ data: null, error: { message: 'Cliente avulso não pode ser vinculado a uma O.S.' } });
+    const serviceOrder = serviceOrderId ? assertTenantReference('service_orders', serviceOrderId, companyId, storeId, 'O.S. vinculada', 'store') : undefined;
+    if (serviceOrder && customerId && String(serviceOrder.customer_id || '') !== customerId) return response.status(400).json({ data: null, error: { message: 'A O.S. vinculada pertence a outro cliente.', code: 'SALE_SERVICE_ORDER_CUSTOMER_MISMATCH' } });
     const items: Array<{ productId: string | null; productName: string; quantity: number; unitPrice: number; manual: boolean }> = [];
     for (const rawItem of rawItems) {
       const isManual = Boolean(rawItem?.manual);
@@ -1348,8 +1549,7 @@ app.post('/api/operations/sales', requireAuth, (request: AuthenticatedRequest, r
       }
       const productId = String(rawItem?.product_id || rawItem?.id || '');
       if (!productId) return response.status(400).json({ data: null, error: { message: 'Produto inválido.' } });
-      const product = selectRows('SELECT id, name, company_id, price FROM products WHERE id = ? LIMIT 1', [productId])[0];
-      if (!product || String(product.company_id) !== companyId) return response.status(400).json({ data: null, error: { message: 'Produto inválido para a empresa informada.' } });
+      const product = assertTenantReference('products', productId, companyId, null, 'Produto');
       const stock = selectRows('SELECT id, quantity, reserved_quantity FROM product_stock WHERE product_id = ? AND store_id = ? LIMIT 1', [productId, storeId])[0];
       const physicalStock = Number(stock?.quantity || 0);
       const reservedStock = Number(stock?.reserved_quantity || 0);
@@ -1377,7 +1577,7 @@ app.post('/api/operations/sales', requireAuth, (request: AuthenticatedRequest, r
     const displayCustomerName = customerName || guestName || 'Cliente avulso';
     getDatabase().run('BEGIN');
     transactionStarted = true;
-    execute('INSERT INTO sales (id, company_id, store_id, customer_id, seller_id, date, total, discount, installments, service_order_id, notes, status, payment_method, customer_name, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', [saleId, companyId, storeId, customerId, saleData.seller_id ? String(saleData.seller_id) : null, saleDate, total, discount, saleData.installments ? Number(saleData.installments) : null, serviceOrderId, saleData.notes ? String(saleData.notes) : null, 'completed', paymentMethod, displayCustomerName, now()]);
+    execute('INSERT INTO sales (id, company_id, store_id, customer_id, seller_id, date, total, discount, installments, service_order_id, notes, status, payment_method, customer_name, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', [saleId, companyId, storeId, customerId, sellerId, saleDate, total, discount, saleData.installments ? Number(saleData.installments) : null, serviceOrderId, saleData.notes ? String(saleData.notes) : null, 'completed', paymentMethod, displayCustomerName, now()]);
     for (const item of items) {
       execute('INSERT INTO sale_items (id, sale_id, product_id, product_name, quantity, unit_price, total_price, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', [newId(), saleId, item.productId, item.productName, item.quantity, item.unitPrice, Number((item.quantity * item.unitPrice).toFixed(2)), now()]);
       if (item.manual || !item.productId) continue;
@@ -1504,6 +1704,7 @@ app.post('/api/operations/financial/:id/settle', requireAuth, (request: Authenti
     if (!rowInScope('financial_entries', current, request.profile)) {
       return response.status(403).json({ data: null, error: { message: 'Lançamento fora do seu escopo.', code: '403' } });
     }
+    assertOriginReference(current.origin_table, current.origin_id, String(current.company_id), current.store_id ? String(current.store_id) : null, 'Origem financeira');
     if (!['receivable', 'payable'].includes(String(current.type))) {
       return response.status(400).json({ data: null, error: { message: 'Somente contas a receber ou a pagar podem ser baixadas por esta operação.', code: 'INVALID_FINANCIAL_TYPE' } });
     }
@@ -1606,7 +1807,8 @@ app.post('/api/operations/financial/recurring/generate', requireAuth, (request: 
     const asOf = new Date(String(request.body?.as_of || now()));
     if (!companyId || Number.isNaN(asOf.getTime())) return response.status(400).json({ data: null, error: { message: 'Empresa e data de referência são obrigatórias.', code: 'INVALID_RECURRENCE' } });
     if (!profileCompanies(request.profile).includes(companyId) && !isMaster(request.profile)) return response.status(403).json({ data: null, error: { message: 'Empresa fora do seu escopo.', code: '403' } });
-    const templates = selectRows("SELECT * FROM financial_entries WHERE company_id = ? AND is_recurring = 1 AND recurrence_source_id IS NULL AND status <> 'cancelled'", [companyId]);
+    const templates = selectRows("SELECT * FROM financial_entries WHERE company_id = ? AND is_recurring = 1 AND recurrence_source_id IS NULL AND status <> 'cancelled'", [companyId])
+      .filter((source) => rowInScope('financial_entries', source, request.profile));
     const generated: Record<string, unknown>[] = [];
     getDatabase().run('BEGIN');
     transactionStarted = true;
@@ -1651,6 +1853,7 @@ app.post('/api/operations/financial/installments', requireAuth, (request: Authen
     const intervalDays = Math.max(1, Math.floor(Number(input.interval_days || 30)));
     const firstDueDate = String(input.first_due_date || '').slice(0, 10);
     if (!companyId || !storeId || !description || !Number.isFinite(totalAmount) || totalAmount <= 0 || installmentCount < 2 || installmentCount > 120 || !/^\d{4}-\d{2}-\d{2}$/.test(firstDueDate)) return response.status(400).json({ data: null, error: { message: 'Empresa, loja, descrição, valor, parcelas e primeiro vencimento válidos são obrigatórios.', code: 'INVALID_INSTALLMENTS' } });
+    validateTenantLinks('financial_installment_groups', { company_id: companyId, store_id: storeId, category_id: input.category_id || null }, request.profile);
     if (!rowInScope('financial_entries', { company_id: companyId, store_id: storeId }, request.profile)) return response.status(403).json({ data: null, error: { message: 'Despesa fora do escopo permitido.', code: '403' } });
     const groupId = newId();
     const cents = Math.round(totalAmount * 100);
@@ -1717,6 +1920,7 @@ app.post('/api/operations/financial/:id/reverse', requireAuth, (request: Authent
     const reason = String(request.body?.reason || '').trim().slice(0, 500);
     if (!entry) return response.status(404).json({ data: null, error: { message: 'Lançamento não encontrado.', code: '404' } });
     if (!rowInScope('financial_entries', entry, request.profile)) return response.status(403).json({ data: null, error: { message: 'Lançamento fora do seu escopo.', code: '403' } });
+    assertOriginReference(entry.origin_table, entry.origin_id, String(entry.company_id), entry.store_id ? String(entry.store_id) : null, 'Origem financeira');
     if (String(entry.status) === 'cancelled' || String(entry.origin_table) === 'financial_reversal') return response.status(409).json({ data: null, error: { message: 'Este lançamento não pode ser estornado novamente.', code: 'ALREADY_REVERSED' } });
     if (!reason) return response.status(400).json({ data: null, error: { message: 'Informe o motivo do estorno.', code: 'REVERSAL_REASON_REQUIRED' } });
     const amount = Number(Number(entry.paid_amount || entry.amount || 0).toFixed(2));
@@ -1754,7 +1958,11 @@ app.post('/api/operations/financial/card-settlements/:id/settle', requireAuth, (
     const bankTransactionId = request.body?.bank_transaction_id ? String(request.body.bank_transaction_id) : null;
     if (Number.isNaN(new Date(settledDate).getTime()) || !Number.isFinite(actualNetAmount) || actualNetAmount < 0) return response.status(400).json({ data: null, error: { message: 'Data ou valor líquido recebido inválido.', code: 'INVALID_CARD_SETTLEMENT' } });
     const bankTransaction = bankTransactionId ? selectRows('SELECT * FROM bank_transactions WHERE id = ? LIMIT 1', [bankTransactionId])[0] : null;
-    if (bankTransactionId && (!bankTransaction || !rowInScope('bank_transactions', bankTransaction, request.profile))) return response.status(403).json({ data: null, error: { message: 'Transação bancária inválida ou fora do escopo.', code: 'INVALID_BANK_TRANSACTION' } });
+    if (bankTransactionId && !bankTransaction) return response.status(400).json({ data: null, error: { message: 'Transação bancária inválida.', code: 'INVALID_BANK_TRANSACTION' } });
+    if (bankTransactionId) {
+      assertTenantReference('bank_transactions', bankTransactionId, settlement.company_id, null, 'Transação bancária');
+      if (!rowInScope('bank_transactions', bankTransaction, request.profile)) return response.status(403).json({ data: null, error: { message: 'Transação bancária fora do escopo.', code: 'INVALID_BANK_TRANSACTION' } });
+    }
     if (bankTransactionId && Number(bankTransaction.is_reconciled || 0) === 1 && String(bankTransaction.matched_entry_id || '') !== String(settlement.entry_id || '')) return response.status(409).json({ data: null, error: { message: 'A transação bancária já está conciliada com outro lançamento.', code: 'BANK_TRANSACTION_ALREADY_MATCHED' } });
     if (bankTransactionId && selectRows('SELECT id FROM financial_card_settlements WHERE bank_transaction_id = ? AND id <> ? LIMIT 1', [bankTransactionId, settlementId]).length > 0) return response.status(409).json({ data: null, error: { message: 'A transação bancária já está vinculada a outra parcela de cartão.', code: 'BANK_TRANSACTION_ALREADY_LINKED' } });
     const timestamp = now();
@@ -1792,6 +2000,7 @@ app.post('/api/operations/financial/transfers', requireAuth, (request: Authentic
     const fromCashId = input.from_cash_register_id ? String(input.from_cash_register_id) : null;
     const toCashId = input.to_cash_register_id ? String(input.to_cash_register_id) : null;
     if (!companyId || !Number.isFinite(amount) || amount <= 0 || (!fromBankId && !fromCashId) || (!toBankId && !toCashId)) return response.status(400).json({ data: null, error: { message: 'Origem, destino e valor válidos são obrigatórios.', code: 'INVALID_TRANSFER' } });
+    validateTenantLinks('financial_transfers', { company_id: companyId, from_store_id: fromStoreId, to_store_id: toStoreId, from_bank_account_id: fromBankId, to_bank_account_id: toBankId, from_cash_register_id: fromCashId, to_cash_register_id: toCashId }, request.profile);
     if ([fromBankId, fromCashId].filter(Boolean).length !== 1 || [toBankId, toCashId].filter(Boolean).length !== 1) return response.status(400).json({ data: null, error: { message: 'Selecione exatamente uma conta ou caixa de origem e um destino.', code: 'INVALID_TRANSFER_ENDPOINTS' } });
     if (fromBankId && toBankId && fromBankId === toBankId) return response.status(400).json({ data: null, error: { message: 'A origem e o destino bancário devem ser diferentes.', code: 'SAME_TRANSFER_ENDPOINT' } });
     if (fromCashId && toCashId && fromCashId === toCashId) return response.status(400).json({ data: null, error: { message: 'A origem e o destino de caixa devem ser diferentes.', code: 'SAME_TRANSFER_ENDPOINT' } });
@@ -1907,6 +2116,8 @@ app.post('/api/operations/financial/reconciliation/match', requireAuth, (request
     const bankTransaction = selectRows('SELECT * FROM bank_transactions WHERE id = ? LIMIT 1', [transactionId])[0];
     const entry = selectRows('SELECT * FROM financial_entries WHERE id = ? LIMIT 1', [entryId])[0];
     if (!bankTransaction || !entry) return response.status(404).json({ data: null, error: { message: 'Transação bancária ou lançamento não encontrado.', code: 'NOT_FOUND' } });
+    const bankScope = relatedScope('bank_transactions', bankTransaction);
+    if (String(bankScope.companyId || '') !== String(entry.company_id || '')) return response.status(403).json({ data: null, error: { message: 'Conciliação fora do escopo permitido.', code: 'TENANT_SCOPE_FORBIDDEN' } });
     if (!rowInScope('bank_transactions', bankTransaction, request.profile) || !rowInScope('financial_entries', entry, request.profile)) {
       return response.status(403).json({ data: null, error: { message: 'Conciliação fora do seu escopo.', code: '403' } });
     }
@@ -1944,6 +2155,7 @@ app.post('/api/operations/financial/manual-entry', requireAuth, (request: Authen
     const amount = Number(input.amount);
     if (!['in', 'out', 'receivable', 'payable'].includes(type) || !Number.isFinite(amount) || amount <= 0 || !input.company_id || !input.store_id) return response.status(400).json({ data: null, error: { message: 'Empresa, loja, tipo e valor válidos são obrigatórios.', code: 'INVALID_MANUAL_ENTRY' } });
     if (['receivable', 'payable'].includes(type) && String(input.status || 'pending') === 'paid') return response.status(400).json({ data: null, error: { message: 'Contas manuais a pagar ou receber devem ser baixadas pela operação de baixa.', code: 'INVALID_MANUAL_STATUS' } });
+    validateTenantLinks('financial_entries', input, request.profile);
     if (!scopeInput('financial_entries', input, request.profile)) return response.status(403).json({ data: null, error: { message: 'Lançamento fora do escopo permitido.', code: '403' } });
     const id = String(input.id || newId());
     const createdAt = String(input.created_at || now());
@@ -1971,7 +2183,8 @@ app.post('/api/operations/financial/manual-entry', requireAuth, (request: Authen
     return response.status(201).json({ data: relationRows('financial_entries', deserializeRow(selectRows('SELECT * FROM financial_entries WHERE id = ?', [id])[0]), '*'), error: null });
   } catch (error) {
     if (transactionStarted) { try { getDatabase().run('ROLLBACK'); } catch { /* rollback best effort */ } }
-    return response.status(400).json({ data: null, error: errorPayload(error) });
+    const statusCode = Number((error as { statusCode?: number })?.statusCode || 400);
+    return response.status(statusCode).json({ data: null, error: errorPayload(error) });
   }
 });
 
@@ -2116,6 +2329,7 @@ app.post('/api/operations/cash/movements', requireAuth, (request: AuthenticatedR
     const register = selectRows('SELECT * FROM cash_registers WHERE id = ? LIMIT 1', [registerId])[0];
     if (!register) return response.status(404).json({ data: null, error: { message: 'Caixa não encontrado.', code: 'NOT_FOUND' } });
     if (!rowInScope('cash_registers', register, request.profile)) return response.status(403).json({ data: null, error: { message: 'Caixa fora do seu escopo.', code: '403' } });
+    assertOriginReference(request.body?.reference_table, request.body?.reference_id, String(register.company_id), String(register.store_id), 'Origem do movimento');
     if (register.status !== 'open' || !['sale', 'withdrawal', 'reinforcement'].includes(type)) return response.status(400).json({ data: null, error: { message: 'Caixa aberto e tipo de movimento válido são obrigatórios.', code: 'INVALID_CASH_MOVEMENT' } });
     if (!Number.isFinite(amount) || amount <= 0) return response.status(400).json({ data: null, error: { message: 'Valor da movimentação inválido.', code: 'INVALID_AMOUNT' } });
     const movements = selectRows('SELECT type, amount FROM cash_register_movements WHERE cash_register_id = ?', [registerId]);
@@ -2438,6 +2652,24 @@ function fiscalScopeAllowed(request: AuthenticatedRequest, companyId: string, st
   return rowInScope('fiscal_documents', { company_id: companyId, store_id: storeId }, request.profile);
 }
 
+function validateFiscalLinks(
+  request: AuthenticatedRequest,
+  companyId: string,
+  storeId: string,
+  customerId?: unknown,
+  originTable?: unknown,
+  originId?: unknown,
+  items: unknown[] = [],
+) {
+  assertCompanyStoreScope(companyId, storeId, request.profile);
+  assertOptionalTenantReference('customers', customerId, companyId, storeId, 'Cliente', 'store');
+  if (stringId(originTable) !== 'manual') assertOriginReference(originTable, originId, companyId, storeId, 'Origem fiscal');
+  for (const item of items) {
+    const productId = (item as Record<string, unknown> | null)?.product_id || (item as Record<string, unknown> | null)?.productId;
+    assertOptionalTenantReference('products', productId, companyId, null, 'Produto fiscal');
+  }
+}
+
 function fiscalPermission(request: AuthenticatedRequest, action: string) {
   return isMaster(request.profile) || hasModulePermission(request.profile, 'fiscal', action);
 }
@@ -2578,6 +2810,8 @@ app.post('/api/operations/fiscal/from-sales/:id', requireAuth, (request: Authent
     const sale = selectRows('SELECT * FROM sales WHERE id = ? LIMIT 1', [request.params.id])[0];
     if (!sale) return response.status(404).json({ data: null, error: { message: 'Venda não encontrada.', code: 'SALE_NOT_FOUND' } });
     if (!fiscalScopeAllowed(request, String(sale.company_id), String(sale.store_id))) return response.status(403).json({ data: null, error: { message: 'Venda fora do escopo permitido.', code: 'FISCAL_SCOPE_FORBIDDEN' } });
+    const sourceItems = selectRows('SELECT product_id FROM sale_items WHERE sale_id = ?', [sale.id]);
+    validateFiscalLinks(request, String(sale.company_id), String(sale.store_id), sale.customer_id, 'sales', sale.id, sourceItems);
     if (String(sale.status) === 'cancelled') return response.status(409).json({ data: null, error: { message: 'Venda cancelada não pode originar nova nota fiscal.', code: 'FISCAL_CANCELLED_ORIGIN' } });
     const type = String(request.body?.type || 'NFC-e');
     if (!fiscalTypes.has(type) || type === 'NFS-e') return response.status(400).json({ data: null, error: { message: 'Venda de mercadoria deve originar NF-e ou NFC-e.', code: 'FISCAL_INVALID_SALE_TYPE' } });
@@ -2607,6 +2841,7 @@ app.post('/api/operations/fiscal/from-service-orders/:id', requireAuth, (request
     const order = selectRows('SELECT * FROM service_orders WHERE id = ? LIMIT 1', [request.params.id])[0];
     if (!order) return response.status(404).json({ data: null, error: { message: 'Ordem de serviço não encontrada.', code: 'SERVICE_ORDER_NOT_FOUND' } });
     if (!fiscalScopeAllowed(request, String(order.company_id), String(order.store_id))) return response.status(403).json({ data: null, error: { message: 'O.S. fora do escopo permitido.', code: 'FISCAL_SCOPE_FORBIDDEN' } });
+    validateFiscalLinks(request, String(order.company_id), String(order.store_id), order.customer_id, 'service_orders', order.id, [{ product_id: order.product_id }]);
     const type = String(request.body?.type || 'NFS-e');
     if (type !== 'NFS-e') return response.status(400).json({ data: null, error: { message: 'O.S. deve originar uma NFS-e nesta etapa.', code: 'FISCAL_INVALID_SERVICE_TYPE' } });
     const idempotencyKey = `service_order:${order.id}:${type}`;
@@ -2651,8 +2886,9 @@ app.post('/api/operations/fiscal/documents', requireAuth, (request: Authenticate
     const idempotencyKey = String(request.body?.idempotency_key || request.headers['idempotency-key'] || `fiscal-draft:${id}`).trim();
     const existing = selectRows('SELECT * FROM fiscal_documents WHERE idempotency_key = ? LIMIT 1', [idempotencyKey])[0];
     if (existing) return response.status(200).json({ data: fiscalDetail(String(existing.id), request.profile), error: null });
-    execute('INSERT INTO fiscal_documents (id, company_id, store_id, type, operation, environment, series, number, status, customer_id, customer_name, customer_document, origin_table, origin_id, total, discount, notes, idempotency_key, created_by, created_by_name, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', [id, companyId, storeId, type, operation, environment, series, 'draft', request.body?.customer_id || null, customerName, String(request.body?.customer_document || '').replace(/\D/g, '') || null, request.body?.origin_table || null, request.body?.origin_id || null, total, Number(request.body?.discount || 0) || 0, String(request.body?.notes || request.body?.note || '').trim() || null, idempotencyKey, request.userId || null, actorName(request.userId), timestamp, timestamp]);
     const items = Array.isArray(request.body?.items) ? request.body.items : [];
+    validateFiscalLinks(request, companyId, storeId, request.body?.customer_id, request.body?.origin_table, request.body?.origin_id, items);
+    execute('INSERT INTO fiscal_documents (id, company_id, store_id, type, operation, environment, series, number, status, customer_id, customer_name, customer_document, origin_table, origin_id, total, discount, notes, idempotency_key, created_by, created_by_name, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', [id, companyId, storeId, type, operation, environment, series, 'draft', request.body?.customer_id || null, customerName, String(request.body?.customer_document || '').replace(/\D/g, '') || null, request.body?.origin_table || null, request.body?.origin_id || null, total, Number(request.body?.discount || 0) || 0, String(request.body?.notes || request.body?.note || '').trim() || null, idempotencyKey, request.userId || null, actorName(request.userId), timestamp, timestamp]);
     for (const rawItem of items) {
       const quantity = Math.max(1, Math.floor(Number(rawItem?.quantity || 1)));
       const unitPrice = Number(rawItem?.unit_price || rawItem?.unitPrice || 0) || 0;
@@ -2662,7 +2898,8 @@ app.post('/api/operations/fiscal/documents', requireAuth, (request: Authenticate
     persistDatabase();
     return response.status(201).json({ data: fiscalDetail(id, request.profile), error: null });
   } catch (error) {
-    return response.status(400).json({ data: null, error: errorPayload(error) });
+    const statusCode = Number((error as { statusCode?: number })?.statusCode || 400);
+    return response.status(statusCode).json({ data: null, error: errorPayload(error) });
   }
 });
 
@@ -2676,11 +2913,13 @@ app.patch('/api/operations/fiscal/documents/:id', requireAuth, (request: Authent
     const customerName = request.body?.customer_name === undefined ? String(document.customer_name || '') : String(request.body.customer_name || '').trim();
     const total = request.body?.total === undefined ? Number(document.total || 0) : Number(request.body.total || 0);
     if (!customerName || !Number.isFinite(total) || total <= 0) return response.status(400).json({ data: null, error: { message: 'Destinatário e valor total maior que zero são obrigatórios.', code: 'FISCAL_INVALID_TOTAL' } });
+    const nextItems = Array.isArray(request.body?.items) ? request.body.items : [];
+    validateFiscalLinks(request, String(document.company_id), String(document.store_id), request.body?.customer_id ?? document.customer_id, document.origin_table, document.origin_id, nextItems);
     const timestamp = now();
     execute('UPDATE fiscal_documents SET customer_id = ?, customer_name = ?, customer_document = ?, total = ?, discount = ?, notes = ?, updated_at = ? WHERE id = ?', [request.body?.customer_id ?? document.customer_id ?? null, customerName, request.body?.customer_document === undefined ? document.customer_document ?? null : String(request.body.customer_document || '').replace(/\D/g, '') || null, total, request.body?.discount === undefined ? Number(document.discount || 0) : Number(request.body.discount || 0), request.body?.notes === undefined ? document.notes ?? null : String(request.body.notes || '').trim() || null, timestamp, document.id]);
     if (Array.isArray(request.body?.items)) {
       execute('DELETE FROM fiscal_document_items WHERE document_id = ?', [document.id]);
-      for (const rawItem of request.body.items) {
+      for (const rawItem of nextItems) {
         const quantity = Math.max(1, Math.floor(Number(rawItem?.quantity || 1)));
         const unitPrice = Number(rawItem?.unit_price || rawItem?.unitPrice || 0) || 0;
         execute('INSERT INTO fiscal_document_items (id, document_id, product_id, product_name, sku, barcode, ncm, cest, cfop, cst, csosn, quantity, unit_price, total_price, tax_json, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)', [newId(), document.id, rawItem?.product_id || rawItem?.productId || null, String(rawItem?.product_name || rawItem?.productName || 'Item sem descrição'), rawItem?.sku || null, rawItem?.barcode || null, rawItem?.ncm || null, rawItem?.cest || null, rawItem?.cfop || null, rawItem?.cst || null, rawItem?.csosn || null, quantity, unitPrice, Number(rawItem?.total_price || rawItem?.totalPrice || unitPrice * quantity) || 0, JSON.stringify(rawItem?.tax_json || rawItem?.tax || {}), timestamp]);
@@ -2875,6 +3114,7 @@ app.get('/api/tables/:table', (request: AuthenticatedRequest, response: Response
 });
 
 app.post('/api/tables/:table', (request: AuthenticatedRequest, response) => {
+  let transactionStarted = false;
   try {
     const table = String(request.params.table);
     if (table === 'financial_entry_audits') return response.status(403).json({ data: null, error: { message: 'A auditoria financeira é somente leitura.', code: 'AUDIT_READ_ONLY' } });
@@ -2886,9 +3126,13 @@ app.post('/api/tables/:table', (request: AuthenticatedRequest, response) => {
     const columns = tableColumns(table);
     const input = Array.isArray(request.body?.data) ? request.body.data : [request.body?.data || {}];
     const inserted: Record<string, unknown>[] = [];
+    getDatabase().run('BEGIN');
+    transactionStarted = true;
     for (const item of input) {
       const row = { ...item } as Record<string, unknown>;
       if (table === 'products' && row.cost !== undefined && !hasModulePermission(request.profile, 'products', 'manage_cost')) {
+        getDatabase().run('ROLLBACK');
+        transactionStarted = false;
         return response.status(403).json({ data: null, error: { message: 'Sem permissão para definir preço de custo.', code: '403' } });
       }
       if (table === 'products') {
@@ -2912,7 +3156,10 @@ app.post('/api/tables/:table', (request: AuthenticatedRequest, response) => {
         if (columns.has('requested_by')) row.requested_by = request.userId;
         if (columns.has('requested_by_name')) row.requested_by_name = actorName(request.userId);
       }
+      validateTenantLinks(table, row, request.profile);
       if (!scopeInput(table, row, request.profile)) {
+        getDatabase().run('ROLLBACK');
+        transactionStarted = false;
         return response.status(403).json({ data: null, error: { message: 'Registro fora do escopo permitido.', code: '403' } });
       }
       if (table === 'financial_entries' && !row.audit_log) row.audit_log = { created_by: request.userId || null, created_by_name: actorName(request.userId), created_at: createdAt, changes: [] };
@@ -2941,15 +3188,22 @@ app.post('/api/tables/:table', (request: AuthenticatedRequest, response) => {
       if (!result) throw new Error('Registro inserido não pôde ser recuperado.');
       inserted.push(relationRows(table, result, String(request.body?.select || '*')));
     }
+    getDatabase().run('COMMIT');
+    transactionStarted = false;
     persistDatabase();
     const data = request.body?.single ? inserted[0] || null : inserted;
     return response.status(201).json({ data, error: null });
   } catch (error) {
-    return response.status(400).json({ data: null, error: errorPayload(error) });
+    if (transactionStarted) {
+      try { getDatabase().run('ROLLBACK'); } catch { /* rollback best effort */ }
+    }
+    const statusCode = Number((error as { statusCode?: number })?.statusCode || 400);
+    return response.status(statusCode).json({ data: null, error: errorPayload(error) });
   }
 });
 
 app.patch('/api/tables/:table', (request: AuthenticatedRequest, response) => {
+  let transactionStarted = false;
   try {
     const table = String(request.params.table);
     if (table === 'financial_entry_audits') return response.status(403).json({ data: null, error: { message: 'A auditoria financeira é somente leitura.', code: 'AUDIT_READ_ONLY' } });
@@ -2989,13 +3243,16 @@ app.patch('/api/tables/:table', (request: AuthenticatedRequest, response) => {
       && updates.some(([key]) => ['amount', 'status', 'paid_amount', 'payment_date', 'payment_method', 'origin_table', 'origin_id'].includes(key))) {
       return response.status(409).json({ data: null, error: { message: 'Lançamentos originados de Vendas, O.S. ou Crediário devem ser alterados na origem ou por uma operação financeira dedicada.', code: 'ORIGIN_LOCKED' } });
     }
+    const nextRows = candidates.map((row) => ({ row, nextRow: { ...row, ...Object.fromEntries(updates.map(([key, value]) => [key, value])) } }));
+    for (const { nextRow } of nextRows) {
+      validateTenantLinks(table, nextRow, request.profile);
+      if (!scopeInput(table, nextRow, request.profile)) return response.status(403).json({ data: null, error: { message: 'Registro fora do escopo permitido.', code: '403' } });
+    }
     const setSql = updates.map(([key]) => `${quoteIdentifier(key)} = ?`).join(', ');
     const values = updates.map(([key, value]) => serializeValue(key, value));
-    for (const row of candidates) {
-      const nextRow = { ...row, ...Object.fromEntries(updates.map(([key, value]) => [key, value])) };
-      if (!scopeInput(table, nextRow, request.profile)) {
-        return response.status(403).json({ data: null, error: { message: 'Registro fora do escopo permitido.', code: '403' } });
-      }
+    getDatabase().run('BEGIN');
+    transactionStarted = true;
+    for (const { row, nextRow } of nextRows) {
       const productAuditChanges = table === 'products'
         ? Object.fromEntries(updates.filter(([key]) => !['updated_by', 'updated_by_name'].includes(key)).map(([key, value]) => [key, { oldValue: row[key], newValue: value }]))
         : {};
@@ -3007,6 +3264,8 @@ app.patch('/api/tables/:table', (request: AuthenticatedRequest, response) => {
         execute('INSERT INTO service_order_timeline (id, service_order_id, action, user_name, user_id, status, date, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)', [newId(), row.id, `Status alterado de ${serviceOrderStatusLabel(row.status || 'opened')} para ${serviceOrderStatusLabel(requestedStatus)}`, userName, request.userId, String(requestedStatus), timestamp, timestamp]);
       }
     }
+    getDatabase().run('COMMIT');
+    transactionStarted = false;
     persistDatabase();
     const updatedRows = candidates.map((row) => relationRows(table, selectRows(`SELECT * FROM ${tableName} WHERE id = ?`, [row.id])[0], String(request.body?.select || '*')));
     const responseRows = table === 'products'
@@ -3015,7 +3274,11 @@ app.patch('/api/tables/:table', (request: AuthenticatedRequest, response) => {
     const data = request.body?.single ? responseRows[0] || null : responseRows;
     return response.json({ data, error: null });
   } catch (error) {
-    return response.status(400).json({ data: null, error: errorPayload(error) });
+    if (transactionStarted) {
+      try { getDatabase().run('ROLLBACK'); } catch { /* rollback best effort */ }
+    }
+    const statusCode = Number((error as { statusCode?: number })?.statusCode || 400);
+    return response.status(statusCode).json({ data: null, error: errorPayload(error) });
   }
 });
 
@@ -3153,14 +3416,18 @@ app.use((error: unknown, _request: Request, response: Response, _next: NextFunct
   response.status(statusCode).json({ data: null, error: errorPayload(error) });
 });
 
-initDatabase().then(() => {
-  startBackupScheduler();
-  runBackupScheduler().catch((error) => console.error('[backup-scheduler:first-run]', error));
-  app.listen(port, '0.0.0.0', () => console.log(`Servidor local em http://localhost:${port}`));
-}).catch((error) => {
-  console.error('Falha ao iniciar o banco local:', error);
-  process.exitCode = 1;
-});
+if (process.env.OTICA_DISABLE_LISTEN !== 'true') {
+  initDatabase().then(() => {
+    if (process.env.OTICA_DISABLE_SCHEDULER !== 'true') {
+      startBackupScheduler();
+      runBackupScheduler().catch((error) => console.error('[backup-scheduler:first-run]', error));
+    }
+    app.listen(port, '0.0.0.0', () => console.log(`Servidor local em http://localhost:${port}`));
+  }).catch((error) => {
+    console.error('Falha ao iniciar o banco local:', error);
+    process.exitCode = 1;
+  });
+}
 
 function mimeFromName(fileName: string) {
   const extension = path.extname(fileName).toLowerCase();

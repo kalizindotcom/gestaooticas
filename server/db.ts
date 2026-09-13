@@ -8,7 +8,7 @@ import bcrypt from 'bcryptjs';
 
 const require = createRequire(import.meta.url);
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const dataDir = path.join(projectRoot, 'data');
+const dataDir = path.resolve(process.env.OTICA_DATA_DIR || path.join(projectRoot, 'data'));
 const databasePath = path.join(dataDir, 'otica-nordestina.sqlite');
 const backupDir = path.join(dataDir, 'backups');
 const restorePendingPath = path.join(backupDir, 'restore-pending.json');
