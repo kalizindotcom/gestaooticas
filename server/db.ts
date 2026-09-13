@@ -17,6 +17,17 @@ const SCHEMA_VERSION = '20';
 let SQL: SqlJsStatic;
 let database: Database;
 
+type SqlParameter = number | string | Uint8Array | null;
+
+function bindParameters(params: unknown[]): SqlParameter[] {
+  return params.map((value) => {
+    if (value === undefined || value === null) return null;
+    if (typeof value === 'boolean') return value ? 1 : 0;
+    if (typeof value === 'number' || typeof value === 'string' || value instanceof Uint8Array) return value;
+    return String(value);
+  });
+}
+
 const schema = `
 PRAGMA foreign_keys = ON;
 CREATE TABLE IF NOT EXISTS app_meta (key TEXT PRIMARY KEY, value TEXT NOT NULL, updated_at TEXT NOT NULL);
@@ -807,7 +818,7 @@ export function tableColumns(table: string) {
 }
 
 export function selectRows(sql: string, params: unknown[] = []) {
-  const statement = getDatabase().prepare(sql, params as any[]);
+  const statement = getDatabase().prepare(sql, bindParameters(params));
   const rows: Record<string, unknown>[] = [];
   while (statement.step()) rows.push(statement.getAsObject() as Record<string, unknown>);
   statement.free();
@@ -815,7 +826,7 @@ export function selectRows(sql: string, params: unknown[] = []) {
 }
 
 export function execute(sql: string, params: unknown[] = []) {
-  getDatabase().run(sql, params as any[]);
+  getDatabase().run(sql, bindParameters(params));
 }
 
 export function quoteIdentifier(value: string) {

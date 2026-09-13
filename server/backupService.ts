@@ -79,6 +79,25 @@ type BackupManifest = {
   uploads?: { file_count: number; size_bytes: number };
 };
 
+type GoogleApiPayload = {
+  access_token?: string;
+  refresh_token?: string;
+  expires_in?: number | string;
+  id?: string;
+  name?: string;
+  webViewLink?: string;
+  size?: number | string;
+  error_description?: string;
+  error?: string | { message?: string; error_description?: string };
+  user?: { displayName?: string; emailAddress?: string; permissionId?: string };
+  files?: Array<{ id: string; name?: string; size?: string; createdTime?: string; modifiedTime?: string; webViewLink?: string; mimeType?: string; md5Checksum?: string }>;
+};
+
+function googleErrorMessage(payload: GoogleApiPayload, fallback: string) {
+  if (typeof payload.error === 'string') return payload.error;
+  return payload.error_description || payload.error?.error_description || payload.error?.message || fallback;
+}
+
 function bool(value: unknown, fallback = false) {
   if (value === undefined || value === null) return fallback;
   return value === true || value === 1 || value === '1' || value === 'true';
@@ -247,7 +266,8 @@ export function saveBackupSettings(input: Record<string, unknown>) {
     else if (['daily_count', 'weekly_count', 'monthly_count', 'schedule_hour', 'schedule_minute', 'retention_daily', 'retention_weekly', 'retention_monthly', 'max_local_backups'].includes(key)) {
       const minimum = key === 'schedule_hour' || key === 'schedule_minute' ? 0 : 1;
       const maximum = key === 'schedule_hour' ? 23 : key === 'schedule_minute' ? 59 : key === 'max_local_backups' ? 500 : 3650;
-      values.push(int(value, Number((current as any)[key] || 0), minimum, maximum));
+      const currentValue = current[key as keyof BackupSettings];
+      values.push(int(value, Number(currentValue || 0), minimum, maximum));
     }
     else values.push(value === null || value === undefined ? null : String(value));
   }
@@ -363,8 +383,8 @@ async function exchangeGoogleCode(code: string, redirectUri: string) {
   const config = googleConfig(redirectUri);
   const body = new URLSearchParams({ code, client_id: config.clientId, client_secret: config.clientSecret, redirect_uri: config.redirectUri, grant_type: 'authorization_code' });
   const response = await fetch('https://oauth2.googleapis.com/token', { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body });
-  const payload = await response.json() as Record<string, any>;
-  if (!response.ok || !payload.refresh_token) throw new Error(payload.error_description || 'Google não devolveu um refresh token. Revogue a autorização anterior e tente conectar novamente.');
+  const payload = await response.json() as GoogleApiPayload;
+  if (!response.ok || !payload.refresh_token) throw new Error(googleErrorMessage(payload, 'Google não devolveu um refresh token. Revogue a autorização anterior e tente conectar novamente.'));
   return payload;
 }
 
@@ -375,8 +395,8 @@ async function googleAccessToken(redirectUri?: string) {
   const config = googleConfig(redirectUri);
   const body = new URLSearchParams({ client_id: config.clientId, client_secret: config.clientSecret, refresh_token: refreshToken, grant_type: 'refresh_token' });
   const response = await fetch('https://oauth2.googleapis.com/token', { method: 'POST', headers: { 'content-type': 'application/x-www-form-urlencoded' }, body });
-  const payload = await response.json() as Record<string, any>;
-  if (!response.ok || !payload.access_token) throw new Error(payload.error_description || 'Não foi possível renovar o acesso ao Google Drive.');
+  const payload = await response.json() as GoogleApiPayload;
+  if (!response.ok || !payload.access_token) throw new Error(googleErrorMessage(payload, 'Não foi possível renovar o acesso ao Google Drive.'));
   execute('UPDATE backup_settings SET google_token_expires_at = ?, updated_at = ? WHERE id = ?', [new Date(Date.now() + Number(payload.expires_in || 3600) * 1000).toISOString(), now(), settingsId]);
   persistDatabase();
   return String(payload.access_token);
@@ -391,8 +411,8 @@ async function driveFetch(url: string, init: RequestInit = {}, redirectUri?: str
 
 async function aboutDrive(redirectUri?: string) {
   const response = await driveFetch('https://www.googleapis.com/drive/v3/about?fields=user(displayName,emailAddress,permissionId)', {}, redirectUri);
-  const payload = await response.json() as Record<string, any>;
-  if (!response.ok) throw new Error(payload.error?.message || 'Não foi possível consultar a conta Google Drive.');
+  const payload = await response.json() as GoogleApiPayload;
+  if (!response.ok) throw new Error(googleErrorMessage(payload, 'Não foi possível consultar a conta Google Drive.'));
   return payload.user || {};
 }
 
@@ -412,8 +432,8 @@ async function ensureDriveFolder(redirectUri?: string) {
     }
   }
   const created = await driveFetch('https://www.googleapis.com/drive/v3/files?fields=id,name,mimeType', { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ name: settings.drive_folder_name, mimeType: 'application/vnd.google-apps.folder' }) }, redirectUri);
-  const payload = await created.json() as Record<string, any>;
-  if (!created.ok || !payload.id) throw new Error(payload.error?.message || 'Não foi possível criar a pasta de backups no Google Drive.');
+  const payload = await created.json() as GoogleApiPayload;
+  if (!created.ok || !payload.id) throw new Error(googleErrorMessage(payload, 'Não foi possível criar a pasta de backups no Google Drive.'));
   saveBackupSettings({ drive_folder_id: payload.id });
   return String(payload.id);
 }
@@ -427,9 +447,15 @@ async function uploadArchiveToDrive(archivePath: string, archiveName: string, re
   const location = init.headers.get('location');
   if (!location) throw new Error('Google Drive não retornou a sessão de upload.');
   const token = await googleAccessToken(redirectUri);
-  const uploadResponse = await fetch(location, { method: 'PUT', headers: { Authorization: `Bearer ${token}`, 'content-type': 'application/gzip', 'content-length': String(stat.size) }, body: fs.createReadStream(archivePath) as any, duplex: 'half' as any });
-  const payload = await uploadResponse.json() as Record<string, any>;
-  if (!uploadResponse.ok || !payload.id) throw new Error(payload.error?.message || `Falha ao enviar backup ao Drive (${uploadResponse.status}).`);
+  const uploadInit = {
+    method: 'PUT',
+    headers: { Authorization: `Bearer ${token}`, 'content-type': 'application/gzip', 'content-length': String(stat.size) },
+    body: fs.createReadStream(archivePath) as unknown as BodyInit,
+    duplex: 'half' as const,
+  } as RequestInit & { duplex: 'half' };
+  const uploadResponse = await fetch(location, uploadInit);
+  const payload = await uploadResponse.json() as GoogleApiPayload;
+  if (!uploadResponse.ok || !payload.id) throw new Error(googleErrorMessage(payload, `Falha ao enviar backup ao Drive (${uploadResponse.status}).`));
   return { id: String(payload.id), name: String(payload.name || archiveName), webViewLink: payload.webViewLink ? String(payload.webViewLink) : `https://drive.google.com/file/d/${payload.id}/view`, size: Number(payload.size || stat.size) };
 }
 
@@ -463,8 +489,8 @@ export async function listGoogleDriveBackups(redirectUri?: string) {
   const folderId = await ensureDriveFolder(redirectUri);
   const q = encodeURIComponent(`'${folderId}' in parents and trashed = false`);
   const response = await driveFetch(`https://www.googleapis.com/drive/v3/files?q=${q}&orderBy=createdTime desc&pageSize=100&fields=files(id,name,size,createdTime,modifiedTime,webViewLink,mimeType,md5Checksum)`, {}, redirectUri);
-  const payload = await response.json() as Record<string, any>;
-  if (!response.ok) throw new Error(payload.error?.message || 'Não foi possível listar os backups do Google Drive.');
+  const payload = await response.json() as GoogleApiPayload;
+  if (!response.ok) throw new Error(googleErrorMessage(payload, 'Não foi possível listar os backups do Google Drive.'));
   execute('UPDATE backup_settings SET last_drive_sync_at = ?, updated_at = ? WHERE id = ?', [now(), now(), settingsId]);
   persistDatabase();
   return payload.files || [];
@@ -479,7 +505,7 @@ export async function downloadGoogleDriveBackup(fileId: string, redirectUri?: st
     const output = fs.createWriteStream(target);
     output.on('finish', resolve);
     output.on('error', reject);
-    Readable.fromWeb(response.body as any).pipe(output);
+    Readable.fromWeb(response.body as unknown as Parameters<typeof Readable.fromWeb>[0]).pipe(output);
   });
   return target;
 }
