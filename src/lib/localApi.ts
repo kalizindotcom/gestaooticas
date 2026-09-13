@@ -10,6 +10,8 @@ type AuthSession = {
   access_token: string;
   token_type: string;
   user: Record<string, unknown>;
+  session_cookie?: boolean;
+  session_id?: string;
 };
 
 export type QueryOperation = 'select' | 'insert' | 'update' | 'delete';
@@ -127,8 +129,12 @@ async function request<T>(path: string, init: RequestInit = {}): Promise<ApiResu
   if (session?.access_token) headers.set('Authorization', `Bearer ${session.access_token}`);
 
   try {
-    const response = await fetch(`${API_BASE}${path}`, { ...init, headers });
+    const response = await fetch(`${API_BASE}${path}`, { ...init, headers, credentials: 'include' });
     const payload = await response.json().catch(() => ({ data: null, error: { message: response.statusText } }));
+    if (response.status === 401) {
+      saveSession(null);
+      authListeners?.forEach((listener) => listener('SIGNED_OUT', null));
+    }
     if (!response.ok) return { data: null, error: payload.error || { message: `Erro ${response.status}` } };
     const totalHeader = response.headers.get('X-Total-Count');
     return {
@@ -565,7 +571,7 @@ const backupAdmin = {
     const session = getSessionFromStorage();
     const headers = new Headers();
     if (session?.access_token) headers.set('Authorization', `Bearer ${session.access_token}`);
-    const response = await fetch(`${API_BASE}/admin/backups/${encodeURIComponent(id)}/download`, { headers });
+    const response = await fetch(`${API_BASE}/admin/backups/${encodeURIComponent(id)}/download`, { headers, credentials: 'include' });
     if (!response.ok) {
       const payload = await response.json().catch(() => ({}));
       throw new Error(payload.error?.message || 'Não foi possível baixar o backup.');

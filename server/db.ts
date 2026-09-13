@@ -45,7 +45,7 @@ CREATE TABLE IF NOT EXISTS role_permissions (
 CREATE TABLE IF NOT EXISTS profiles (
   id TEXT PRIMARY KEY, name TEXT, email TEXT NOT NULL UNIQUE, role TEXT DEFAULT 'user', role_id TEXT, avatar_url TEXT,
   companies TEXT DEFAULT '[]', stores TEXT DEFAULT '[]', status TEXT DEFAULT 'active', last_access TEXT,
-  password_hash TEXT, created_at TEXT NOT NULL
+  password_hash TEXT, session_version INTEGER DEFAULT 1, created_at TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS user_permissions (
   id TEXT PRIMARY KEY, user_id TEXT NOT NULL, permission_id TEXT NOT NULL, created_at TEXT NOT NULL,
@@ -384,6 +384,7 @@ export async function initDatabase() {
   ensureColumn('products', 'updated_at', 'TEXT');
   ensureColumn('products', 'updated_by', 'TEXT');
   ensureColumn('products', 'updated_by_name', 'TEXT');
+  ensureColumn('profiles', 'session_version', 'INTEGER DEFAULT 1');
   ensureColumn('product_stock', 'reserved_quantity', 'INTEGER DEFAULT 0');
   ensureColumn('product_stock', 'min_quantity', 'INTEGER DEFAULT 0');
   ensureColumn('product_stock', 'max_quantity', 'INTEGER');
@@ -727,14 +728,16 @@ export function deserializeRow(row: Record<string, unknown>) {
 }
 
 async function seedDefaultAdmin() {
-  if (process.env.LOCAL_SEED_ADMIN === 'false') return;
+  if (process.env.LOCAL_SEED_ADMIN !== 'true') return;
   if (selectRows('SELECT id FROM profiles LIMIT 1').length > 0) return;
-  const email = process.env.LOCAL_ADMIN_EMAIL || 'admin@admin.com';
-  const password = process.env.LOCAL_ADMIN_PASSWORD || 'kaliel123';
+  const email = String(process.env.LOCAL_ADMIN_EMAIL || '').trim().toLowerCase();
+  const password = String(process.env.LOCAL_ADMIN_PASSWORD || '');
+  if (!email || !/^\S+@\S+\.\S+$/.test(email)) throw new Error('LOCAL_ADMIN_EMAIL é obrigatório quando LOCAL_SEED_ADMIN=true.');
+  if (password.length < 12) throw new Error('LOCAL_ADMIN_PASSWORD deve ter pelo menos 12 caracteres.');
   const role = selectRows('SELECT id FROM roles WHERE name = ?', ['admin_master'])[0];
   execute(
-    'INSERT INTO profiles (id, name, email, role, role_id, companies, stores, status, password_hash, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
-    [newId(), 'Administrador Local', email, 'admin_master', role?.id || null, '[]', '[]', 'active', await bcrypt.hash(password, 10), now()],
+    'INSERT INTO profiles (id, name, email, role, role_id, companies, stores, status, password_hash, session_version, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)',
+    [newId(), 'Administrador Local', email, 'admin_master', role?.id || null, '[]', '[]', 'active', await bcrypt.hash(password, 10), 1, now()],
   );
   console.log(`Usuário local inicial: ${email}`);
 }

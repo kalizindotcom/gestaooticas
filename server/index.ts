@@ -48,14 +48,43 @@ import {
 } from './backupService.js';
 import { resolveFiscalProvider } from './fiscalProvider.js';
 import { canTransitionFiscalStatus, isProductionEnvironment } from './fiscalDomain.js';
+import {
+  allowInitialSignup,
+  allowLocalResetToken,
+  assertPasswordPolicy,
+  authSecret,
+  clientAddress,
+  configuredCorsOrigin,
+  isProduction,
+  sessionTtlSeconds,
+} from './securityConfig.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const projectRoot = path.resolve(__dirname, '..');
 const port = Number(process.env.PORT || 3001);
-const authSecret = process.env.LOCAL_AUTH_SECRET || 'otica-nordestina-local-development-secret';
 const uploadsRoot = path.join(projectRoot, 'uploads');
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 25 * 1024 * 1024 } });
+const allowedUploadTypes = new Map([
+  ['.jpg', new Set(['image/jpeg'])],
+  ['.jpeg', new Set(['image/jpeg'])],
+  ['.png', new Set(['image/png'])],
+  ['.webp', new Set(['image/webp'])],
+  ['.pdf', new Set(['application/pdf'])],
+  ['.txt', new Set(['text/plain'])],
+]);
+const upload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 25 * 1024 * 1024, files: 1, fields: 20 },
+  fileFilter: (_request, file, callback) => {
+    const extension = path.extname(file.originalname).toLowerCase();
+    const allowedMimes = allowedUploadTypes.get(extension);
+    if (!allowedMimes || !allowedMimes.has(file.mimetype.toLowerCase())) {
+      return callback(new Error('Tipo de arquivo não permitido. Envie JPG, PNG, WEBP, PDF ou TXT.'));
+    }
+    return callback(null, true);
+  },
+});
+const backupUploadTypes = new Set(['application/gzip', 'application/x-gzip', 'application/octet-stream']);
 const backupUpload = multer({
   storage: multer.diskStorage({
     destination: (_request, _file, callback) => {
@@ -64,7 +93,14 @@ const backupUpload = multer({
     },
     filename: (_request, file, callback) => callback(null, `incoming-${Date.now()}-${newId()}-${path.basename(file.originalname)}`),
   }),
-  limits: { fileSize: 1024 * 1024 * 1024 },
+  limits: { fileSize: 1024 * 1024 * 1024, files: 1, fields: 10 },
+  fileFilter: (_request, file, callback) => {
+    const lowerName = file.originalname.toLowerCase();
+    if (!lowerName.endsWith('.tar.gz') || !backupUploadTypes.has(file.mimetype.toLowerCase())) {
+      return callback(new Error('Envie um arquivo de backup .tar.gz válido.'));
+    }
+    return callback(null, true);
+  },
 });
 
 const uploadRootResolved = path.resolve(uploadsRoot);
@@ -73,9 +109,28 @@ function isWithinUploads(candidate: string) {
   return resolved === uploadRootResolved || resolved.startsWith(`${uploadRootResolved}${path.sep}`);
 }
 
+function isSafeRegularFile(candidate: string) {
+  try {
+    const stat = fs.lstatSync(candidate);
+    return stat.isFile() && !stat.isSymbolicLink();
+  } catch {
+    return false;
+  }
+}
+
+function isSafeDirectory(candidate: string) {
+  try {
+    const stat = fs.lstatSync(candidate);
+    return stat.isDirectory() && !stat.isSymbolicLink();
+  } catch {
+    return false;
+  }
+}
+
 function normalizeStoragePath(value: unknown) {
   const normalized = String(value || '').replaceAll('\\', '/').replace(/^\/+|\/+$/g, '');
-  if (!normalized || normalized.includes('\0')) return null;
+  const segments = normalized.split('/').filter(Boolean);
+  if (!normalized || normalized.includes('\0') || segments.some((segment) => segment === '.' || segment === '..')) return null;
   return normalized;
 }
 
@@ -88,7 +143,9 @@ function canAccessStoragePath(request: Request, bucket: string, relativePath: st
   const [companyId, customerId] = parts;
   if (!profileCompanies(authRequest.profile).includes(companyId)) return false;
   const customer = selectRows('SELECT company_id FROM customers WHERE id = ? LIMIT 1', [customerId])[0];
-  return String(customer?.company_id || '') === companyId;
+  if (String(customer?.company_id || '') !== companyId) return false;
+  const canonical = path.resolve(uploadsRoot, bucket, relativePath);
+  return isWithinUploads(canonical);
 }
 
 function forbiddenStorage(response: Response) {
@@ -119,9 +176,55 @@ interface QueryFilters {
 }
 
 const app = express();
-app.use(cors({ origin: true, credentials: true }));
+app.disable('x-powered-by');
+app.use(cors({ origin: (origin, callback) => callback(null, configuredCorsOrigin(origin)), credentials: true }));
+app.use((_request, response, next) => {
+  response.setHeader('X-Content-Type-Options', 'nosniff');
+  response.setHeader('X-Frame-Options', 'DENY');
+  response.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+  response.setHeader('Permissions-Policy', 'camera=(), microphone=(), geolocation=()');
+  if (isProduction) response.setHeader('Strict-Transport-Security', 'max-age=31536000; includeSubDomains');
+  next();
+});
 app.use(express.json({ limit: '10mb' }));
-app.use(express.urlencoded({ extended: true }));
+app.use(express.urlencoded({ extended: true, limit: '1mb' }));
+
+type RateLimitBucket = { count: number; resetAt: number };
+const rateLimitBuckets = new Map<string, RateLimitBucket>();
+
+function authRateLimit(name: string, maximum: number, windowMs: number) {
+  return (request: Request, response: Response, next: NextFunction) => {
+    const key = `${name}:${clientAddress(request)}`;
+    const currentTime = Date.now();
+    const bucket = rateLimitBuckets.get(key);
+    if (!bucket || bucket.resetAt <= currentTime) {
+      rateLimitBuckets.set(key, { count: 1, resetAt: currentTime + windowMs });
+      return next();
+    }
+    bucket.count += 1;
+    if (bucket.count > maximum) {
+      response.setHeader('Retry-After', String(Math.ceil((bucket.resetAt - currentTime) / 1000)));
+      return response.status(429).json({ data: null, error: { message: 'Muitas tentativas. Aguarde alguns minutos e tente novamente.', code: 'RATE_LIMITED' } });
+    }
+    return next();
+  };
+}
+
+function readCookie(request: Request, name: string) {
+  const header = String(request.headers.cookie || '');
+  const value = header.split(';').map((part) => part.trim()).find((part) => part.startsWith(`${name}=`));
+  return value ? decodeURIComponent(value.slice(name.length + 1)) : undefined;
+}
+
+function setSessionCookie(response: Response, token: string) {
+  const secure = isProduction ? '; Secure' : '';
+  response.setHeader('Set-Cookie', `otica_session=${encodeURIComponent(token)}; HttpOnly; Path=/; Max-Age=${sessionTtlSeconds}; SameSite=Lax${secure}`);
+}
+
+function clearSessionCookie(response: Response) {
+  const secure = isProduction ? '; Secure' : '';
+  response.setHeader('Set-Cookie', `otica_session=; HttpOnly; Path=/; Max-Age=0; SameSite=Lax${secure}`);
+}
 
 const healthResponse = { ok: true, database: 'sqlite' } as const;
 app.get('/health', (_request, response) => response.json(healthResponse));
@@ -247,6 +350,7 @@ function addProductAudit(product: Record<string, unknown>, action: string, chang
 function cleanRow(row: Record<string, unknown>) {
   const output = deserializeRow(row);
   delete output.password_hash;
+  delete output.session_version;
   return output;
 }
 
@@ -371,9 +475,13 @@ function getRows(table: string, query: Request['query'], profile?: Record<string
 
 function getUserFromToken(request: Request) {
   const header = request.headers.authorization;
-  if (!header?.startsWith('Bearer ')) return undefined;
+  const token = header?.startsWith('Bearer ') ? header.slice(7) : readCookie(request, 'otica_session');
+  if (!token) return undefined;
   try {
-    const payload = jwt.verify(header.slice(7), authSecret) as { sub?: string };
+    const payload = jwt.verify(token, authSecret) as { sub?: string; sv?: number };
+    if (!payload.sub) return undefined;
+    const profile = profileById(String(payload.sub));
+    if (!profile || Number(profile.session_version || 1) !== Number(payload.sv || 0)) return undefined;
     return payload.sub;
   } catch {
     return undefined;
@@ -394,8 +502,16 @@ function requireAuth(request: AuthenticatedRequest, response: Response, next: Ne
 
 function issueSession(profile: Record<string, unknown>) {
   const user = cleanRow(profile);
-  const token = jwt.sign({ sub: String(profile.id) }, authSecret, { expiresIn: '7d' });
-  return { access_token: token, token_type: 'bearer', user };
+  const token = issueToken(profile);
+  return { access_token: isProduction ? '' : token, token_type: 'bearer', user, session_cookie: isProduction, session_id: `${String(profile.id)}:${Date.now()}` };
+}
+
+function issueToken(profile: Record<string, unknown>) {
+  return jwt.sign({ sub: String(profile.id), sv: Number(profile.session_version || 1) }, authSecret, { expiresIn: sessionTtlSeconds });
+}
+
+function revokeSessions(profileId: string) {
+  execute('UPDATE profiles SET session_version = COALESCE(session_version, 1) + 1 WHERE id = ?', [profileId]);
 }
 
 function profileById(id: string) {
@@ -588,14 +704,18 @@ if (process.env.NODE_ENV !== 'production') {
   });
 }
 
-app.post('/api/auth/signup', async (request, response) => {
+app.post('/api/auth/signup', authRateLimit('signup', 5, 15 * 60 * 1000), async (request, response) => {
   try {
     const email = String(request.body?.email || '').trim().toLowerCase();
     const password = String(request.body?.password || '');
     const name = String(request.body?.name || email.split('@')[0] || 'Novo Usuário').trim();
-    if (!email || password.length < 6) return response.status(400).json({ data: null, error: { message: 'Informe um e-mail válido e uma senha com pelo menos 6 caracteres.', code: '400' } });
+    if (!email || !/^\S+@\S+\.\S+$/.test(email)) return response.status(400).json({ data: null, error: { message: 'Informe um e-mail válido.', code: '400' } });
+    try { assertPasswordPolicy(password); } catch (error) { return response.status(400).json({ data: null, error: errorPayload(error) }); }
 
     const firstUser = selectRows('SELECT id FROM profiles LIMIT 1').length === 0;
+    if (isProduction && firstUser && !allowInitialSignup) {
+      return response.status(403).json({ data: null, error: { message: 'O cadastro inicial está desativado. Configure o administrador pelo ambiente do servidor.', code: 'INITIAL_SIGNUP_DISABLED' } });
+    }
     if (!firstUser) {
       const requesterId = getUserFromToken(request);
       const requester = requesterId ? profileById(requesterId) : undefined;
@@ -611,14 +731,16 @@ app.post('/api/auth/signup', async (request, response) => {
       [id, name, email, role, roleRow?.id || null, '[]', '[]', 'active', await bcrypt.hash(password, 10), now()],
     );
     persistDatabase();
-    const session = issueSession(profileById(id));
+    const profile = profileById(id) || {};
+    if (isProduction) setSessionCookie(response, issueToken(profile));
+    const session = issueSession(profile);
     return response.status(201).json({ data: session, error: null });
   } catch (error) {
     return response.status(400).json({ data: null, error: errorPayload(error) });
   }
 });
 
-app.post('/api/auth/login', async (request, response) => {
+app.post('/api/auth/login', authRateLimit('login', 10, 15 * 60 * 1000), async (request, response) => {
   const email = String(request.body?.email || '').trim().toLowerCase();
   const password = String(request.body?.password || '');
   const profile = selectRows('SELECT * FROM profiles WHERE lower(email) = ? AND status = \'active\' LIMIT 1', [email])[0];
@@ -627,11 +749,19 @@ app.post('/api/auth/login', async (request, response) => {
   }
   execute('UPDATE profiles SET last_access = ? WHERE id = ?', [now(), profile.id]);
   persistDatabase();
-  return response.json({ data: issueSession(profileForAuth(profile)), error: null });
+  const authenticatedProfile = { ...profile, session_version: profile.session_version || 1 };
+  if (isProduction) setSessionCookie(response, issueToken(authenticatedProfile));
+  return response.json({ data: issueSession(authenticatedProfile), error: null });
 });
 
-app.post('/api/auth/logout', requireAuth, (_request, response) => response.json({ data: null, error: null }));
-app.post('/api/auth/reset-password', (request, response) => {
+app.post('/api/auth/logout', requireAuth, (request: AuthenticatedRequest, response) => {
+  revokeSessions(String(request.userId));
+  persistDatabase();
+  clearSessionCookie(response);
+  return response.json({ data: null, error: null });
+});
+app.post('/api/auth/reset-password', authRateLimit('reset-request', 5, 15 * 60 * 1000), (request, response) => {
+  if (!allowLocalResetToken) return response.status(503).json({ data: null, error: { message: 'A recuperação de senha ainda não está configurada para produção.', code: 'RESET_NOT_CONFIGURED' } });
   const email = String(request.body?.email || '').trim().toLowerCase();
   const profile = selectRows('SELECT id FROM profiles WHERE lower(email) = ? AND status = ? LIMIT 1', [email, 'active'])[0];
   // O sistema permanece discreto quando o e-mail não existe. Em operação local, o token é devolvido para a própria tela em vez de depender de SMTP.
@@ -643,14 +773,16 @@ app.post('/api/auth/reset-password', (request, response) => {
   persistDatabase();
   return response.json({ data: { token, expires_at: expiresAt }, error: null });
 });
-app.post('/api/auth/reset-password/confirm', async (request, response) => {
+app.post('/api/auth/reset-password/confirm', authRateLimit('reset-confirm', 5, 15 * 60 * 1000), async (request, response) => {
   try {
     const token = String(request.body?.token || '').trim();
     const password = String(request.body?.password || '');
-    if (!token || password.length < 6) return response.status(400).json({ data: null, error: { message: 'Token e senha com pelo menos 6 caracteres são obrigatórios.' } });
+    try { assertPasswordPolicy(password); } catch (error) { return response.status(400).json({ data: null, error: errorPayload(error) }); }
+    if (!token) return response.status(400).json({ data: null, error: { message: 'Token obrigatório.' } });
     const reset = selectRows('SELECT id, profile_id, expires_at FROM password_reset_tokens WHERE token_hash = ? AND used_at IS NULL LIMIT 1', [hashResetToken(token)])[0];
     if (!reset || new Date(String(reset.expires_at)).getTime() <= Date.now()) return response.status(400).json({ data: null, error: { message: 'Token inválido ou expirado.' } });
     execute('UPDATE profiles SET password_hash = ? WHERE id = ?', [await bcrypt.hash(password, 10), reset.profile_id]);
+    revokeSessions(String(reset.profile_id));
     execute('UPDATE password_reset_tokens SET used_at = ? WHERE id = ?', [now(), reset.id]);
     persistDatabase();
     return response.json({ data: null, error: null });
@@ -665,12 +797,15 @@ app.patch('/api/auth/users/:id/password', requireAuth, async (request: Authentic
       return response.status(403).json({ data: null, error: { message: 'Sem permissão para alterar esta senha.', code: '403' } });
     }
     const password = String(request.body?.password || '');
-    if (password.length < 6) return response.status(400).json({ data: null, error: { message: 'A senha precisa ter pelo menos 6 caracteres.', code: '400' } });
+    try { assertPasswordPolicy(password); } catch (error) { return response.status(400).json({ data: null, error: errorPayload(error) }); }
     const targetProfile = profileById(targetId);
     if (!targetProfile) return response.status(404).json({ data: null, error: { message: 'Usuário não encontrado.', code: '404' } });
     execute('UPDATE profiles SET password_hash = ? WHERE id = ?', [await bcrypt.hash(password, 10), targetId]);
+    revokeSessions(targetId);
     persistDatabase();
-    return response.json({ data: profileForAuth(profileById(targetId) || {}), error: null });
+    const updatedProfile = profileForAuth(profileById(targetId) || {});
+    if (String(request.userId) === targetId) setSessionCookie(response, issueToken({ ...updatedProfile, session_version: Number(profileById(targetId)?.session_version || 1) }));
+    return response.json({ data: updatedProfile, error: null });
   } catch (error) {
     return response.status(400).json({ data: null, error: errorPayload(error) });
   }
@@ -928,6 +1063,17 @@ function normalizeUserRole(roleIdValue: unknown, roleValue: unknown) {
   return { id: String(role.id), name: String(role.name) };
 }
 
+function validateRoleAssignment(request: AuthenticatedRequest, roleId: string) {
+  if (isMaster(request.profile)) return;
+  const permissions = selectRows(
+    'SELECT p.module, p.action FROM role_permissions rp JOIN permissions p ON p.id = rp.permission_id WHERE rp.role_id = ?',
+    [roleId],
+  );
+  if (permissions.some((permission) => !hasModulePermission(request.profile, String(permission.module), String(permission.action)))) {
+    throw Object.assign(new Error('Não é permitido atribuir um perfil com permissões superiores às suas.'), { statusCode: 403 });
+  }
+}
+
 function normalizePermissionIds(request: AuthenticatedRequest, value: unknown) {
   const permissionIds = normalizeUserScope(value);
   if (isMaster(request.profile) || permissionIds.length === 0) return permissionIds;
@@ -993,7 +1139,7 @@ app.patch('/api/admin/roles/:id', requireAuth, (request: AuthenticatedRequest, r
     const roleId = String(request.params.id);
     const current = selectRows('SELECT * FROM roles WHERE id = ? LIMIT 1', [roleId])[0];
     if (!current) return response.status(404).json({ data: null, error: { message: 'Perfil de acesso não encontrado.', code: '404' } });
-    const name = Boolean(current.is_system) ? String(current.name) : normalizeRoleName(request.body?.name ?? current.name);
+    const name = current.is_system ? String(current.name) : normalizeRoleName(request.body?.name ?? current.name);
     const description = String(request.body?.description ?? current.description ?? '').trim().slice(0, 200);
     const permissionIds = request.body?.permission_ids === undefined
       ? permissionIdsForRole(roleId)
@@ -1027,7 +1173,7 @@ app.delete('/api/admin/roles/:id', requireAuth, (request: AuthenticatedRequest, 
     const roleId = String(request.params.id);
     const current = selectRows('SELECT * FROM roles WHERE id = ? LIMIT 1', [roleId])[0];
     if (!current) return response.status(404).json({ data: null, error: { message: 'Perfil de acesso não encontrado.', code: '404' } });
-    if (Boolean(current.is_system)) return response.status(400).json({ data: null, error: { message: 'Perfis de sistema não podem ser excluídos.', code: '400' } });
+    if (current.is_system) return response.status(400).json({ data: null, error: { message: 'Perfis de sistema não podem ser excluídos.', code: '400' } });
     const assignedUsers = selectRows('SELECT id FROM profiles WHERE role_id = ? OR (role_id IS NULL AND role = ?) LIMIT 1', [roleId, current.name]);
     if (assignedUsers.length > 0) return response.status(409).json({ data: null, error: { message: 'Não é possível excluir um perfil em uso. Reatribua os usuários antes de excluir.', code: 'ROLE_IN_USE' } });
 
@@ -1054,10 +1200,15 @@ app.post('/api/admin/users', requireAuth, async (request: AuthenticatedRequest, 
     const email = String(request.body?.email || '').trim().toLowerCase();
     const name = String(request.body?.name || '').trim();
     const password = String(request.body?.password || '');
-    if (!email || !/^\S+@\S+\.\S+$/.test(email) || !name || password.length < 6) return response.status(400).json({ data: null, error: { message: 'Nome, e-mail válido e senha com pelo menos 6 caracteres são obrigatórios.' } });
+    if (!email || !/^\S+@\S+\.\S+$/.test(email) || !name) return response.status(400).json({ data: null, error: { message: 'Nome e e-mail válido são obrigatórios.' } });
+    assertPasswordPolicy(password);
     if (selectRows('SELECT id FROM profiles WHERE lower(email) = ? LIMIT 1', [email]).length > 0) return response.status(409).json({ data: null, error: { message: 'Já existe um usuário com este e-mail.' } });
+    if ((request.body?.role_id !== undefined || request.body?.role !== undefined || request.body?.permissions !== undefined) && !canManageRoles(request)) {
+      return response.status(403).json({ data: null, error: { message: 'Somente usuários com permissão de gerenciar perfis podem definir papéis ou permissões.', code: 'ROLE_PERMISSION_REQUIRED' } });
+    }
     const role = normalizeUserRole(request.body?.role_id, request.body?.role);
     if (role.name === 'admin_master' && !isMaster(request.profile)) return response.status(403).json({ data: null, error: { message: 'Somente o administrador master pode criar outro master.' } });
+    validateRoleAssignment(request, role.id);
     const companies = normalizeUserScope(request.body?.companies);
     const stores = normalizeUserScope(request.body?.stores);
     validateUserScope(request, companies, stores);
@@ -1088,8 +1239,15 @@ app.patch('/api/admin/users/:id', requireAuth, async (request: AuthenticatedRequ
     const targetId = String(request.params.id);
     const current = profileById(targetId);
     if (!current || !rowInScope('profiles', current, request.profile)) return response.status(403).json({ data: null, error: { message: 'Usuário fora do seu escopo.', code: '403' } });
+    if ((request.body?.role_id !== undefined || request.body?.role !== undefined || request.body?.permissions !== undefined) && !canManageRoles(request)) {
+      return response.status(403).json({ data: null, error: { message: 'Somente usuários com permissão de gerenciar perfis podem alterar papéis ou permissões.', code: 'ROLE_PERMISSION_REQUIRED' } });
+    }
+    if (String(request.userId) === targetId && request.body?.status === 'inactive') {
+      return response.status(400).json({ data: null, error: { message: 'Não é permitido desativar o próprio usuário.', code: 'SELF_DEACTIVATION_FORBIDDEN' } });
+    }
     const role = normalizeUserRole(request.body?.role_id || current.role_id, request.body?.role || current.role);
     if (role.name === 'admin_master' && !isMaster(request.profile)) return response.status(403).json({ data: null, error: { message: 'Somente o master pode atribuir esse papel.' } });
+    validateRoleAssignment(request, role.id);
     const companies = request.body?.companies === undefined ? jsonArray(current.companies) : normalizeUserScope(request.body.companies);
     const stores = request.body?.stores === undefined ? jsonArray(current.stores) : normalizeUserScope(request.body.stores);
     validateUserScope(request, companies, stores);
@@ -1101,12 +1259,17 @@ app.patch('/api/admin/users/:id', requireAuth, async (request: AuthenticatedRequ
     execute('UPDATE profiles SET name = ?, email = ?, role = ?, role_id = ?, companies = ?, stores = ?, status = ? WHERE id = ?', [name, email, role.name, role.id, JSON.stringify(companies), JSON.stringify(stores), request.body?.status === 'inactive' ? 'inactive' : (request.body?.status === 'active' ? 'active' : current.status || 'active'), targetId]);
     if (request.body?.permissions !== undefined) replaceUserPermissions(targetId, normalizePermissionIds(request, request.body.permissions));
     if (request.body?.password) {
-      if (!isMaster(request.profile) || String(request.userId) !== targetId) return response.status(403).json({ data: null, error: { message: 'Somente o master ou o próprio usuário pode alterar esta senha.' } });
-      if (String(request.body.password).length < 6) return response.status(400).json({ data: null, error: { message: 'A senha deve ter pelo menos 6 caracteres.' } });
+      if (!isMaster(request.profile) && String(request.userId) !== targetId) return response.status(403).json({ data: null, error: { message: 'Somente o master ou o próprio usuário pode alterar esta senha.' } });
+      try { assertPasswordPolicy(String(request.body.password)); } catch (error) { return response.status(400).json({ data: null, error: errorPayload(error) }); }
       execute('UPDATE profiles SET password_hash = ? WHERE id = ?', [await bcrypt.hash(String(request.body.password), 10), targetId]);
     }
+    if (request.body?.password || request.body?.status !== undefined || request.body?.role !== undefined || request.body?.role_id !== undefined || request.body?.permissions !== undefined) revokeSessions(targetId);
     persistDatabase();
-    return response.json({ data: profileForAuth(profileById(targetId) || {}), error: null });
+    const updatedProfile = profileById(targetId) || {};
+    if (String(request.userId) === targetId && (request.body?.password || request.body?.role !== undefined || request.body?.role_id !== undefined || request.body?.permissions !== undefined)) {
+      setSessionCookie(response, issueToken(updatedProfile));
+    }
+    return response.json({ data: profileForAuth(updatedProfile), error: null });
   } catch (error) {
     const statusCode = Number((error as { statusCode?: number })?.statusCode || 400);
     return response.status(statusCode).json({ data: null, error: errorPayload(error) });
@@ -2649,6 +2812,14 @@ app.post('/api/operations/fiscal/xml-imports/:id/confirm', requireAuth, (request
   }
 });
 
+const adminManagedTables = new Set(['profiles', 'roles', 'permissions', 'role_permissions', 'user_permissions']);
+
+function canWriteGenericTable(request: AuthenticatedRequest, table: string, operation: 'insert' | 'update' | 'delete') {
+  if (table === 'profiles') return canManageUsers(request, operation === 'insert' ? 'create' : operation === 'update' ? 'edit' : 'delete');
+  if (adminManagedTables.has(table)) return isMaster(request.profile) || canManageRoles(request);
+  return canAccessTable(request, table, operation);
+}
+
 app.use('/api/tables', requireAuth);
 app.get('/api/tables/:table', (request: AuthenticatedRequest, response: Response) => {
   try {
@@ -2658,7 +2829,7 @@ app.get('/api/tables/:table', (request: AuthenticatedRequest, response: Response
     }
     const scopedRows = getRows(table, request.query, request.profile)
       .filter((row) => rowInScope(table, row, request.profile))
-      .map((row) => table === 'products' ? sanitizeProductRow(row, request.profile) : row);
+      .map((row) => table === 'profiles' ? cleanRow(row) : table === 'products' ? sanitizeProductRow(row, request.profile) : row);
     const totalCount = scopedRows.length;
     const offsetValue = Number(readQueryValue(request.query.offset));
     const limitValue = Number(readQueryValue(request.query.limit));
@@ -2685,9 +2856,10 @@ app.post('/api/tables/:table', (request: AuthenticatedRequest, response) => {
   try {
     const table = String(request.params.table);
     if (table === 'financial_entry_audits') return response.status(403).json({ data: null, error: { message: 'A auditoria financeira é somente leitura.', code: 'AUDIT_READ_ONLY' } });
-    if (!canAccessTable(request, table, 'insert')) {
+    if (!canWriteGenericTable(request, table, 'insert')) {
       return response.status(403).json({ data: null, error: { message: 'Sem permissão para criar neste módulo.', code: '403' } });
     }
+    if (table === 'profiles') return response.status(403).json({ data: null, error: { message: 'Use a rota administrativa para criar usuários.', code: 'ADMIN_USER_ROUTE_REQUIRED' } });
     const tableName = safeTable(table);
     const columns = tableColumns(table);
     const input = Array.isArray(request.body?.data) ? request.body.data : [request.body?.data || {}];
@@ -2759,9 +2931,10 @@ app.patch('/api/tables/:table', (request: AuthenticatedRequest, response) => {
   try {
     const table = String(request.params.table);
     if (table === 'financial_entry_audits') return response.status(403).json({ data: null, error: { message: 'A auditoria financeira é somente leitura.', code: 'AUDIT_READ_ONLY' } });
-    if (!canAccessTable(request, table, 'update')) {
+    if (!canWriteGenericTable(request, table, 'update')) {
       return response.status(403).json({ data: null, error: { message: 'Sem permissão para editar este módulo.', code: '403' } });
     }
+    if (table === 'profiles') return response.status(403).json({ data: null, error: { message: 'Use a rota administrativa para editar usuários.', code: 'ADMIN_USER_ROUTE_REQUIRED' } });
     const tableName = safeTable(table);
     const columns = tableColumns(table);
     const filters = parseFilters(request.query);
@@ -2832,9 +3005,10 @@ app.delete('/api/tables/:table', (request: AuthenticatedRequest, response) => {
       if (!hasModulePermission(request.profile, 'products', 'delete_permanently')) {
         return response.status(403).json({ data: null, error: { message: 'Sem permissão para excluir produtos permanentemente.', code: 'PRODUCT_DELETE_PERMISSION_REQUIRED' } });
       }
-    } else if (!canAccessTable(request, table, 'delete')) {
+    } else if (!canWriteGenericTable(request, table, 'delete')) {
       return response.status(403).json({ data: null, error: { message: 'Sem permissão para excluir neste módulo.', code: '403' } });
     }
+    if (table === 'profiles') return response.status(403).json({ data: null, error: { message: 'Use a rota administrativa para excluir usuários.', code: 'ADMIN_USER_ROUTE_REQUIRED' } });
     const tableName = safeTable(table);
     const filters = parseFilters(request.query);
     const candidates = selectRows(`SELECT * FROM ${tableName}`)
@@ -2884,6 +3058,7 @@ app.get('/api/storage/:bucket/list', (request, response) => {
   const directory = path.resolve(uploadsRoot, bucket, prefix);
   if (!isWithinUploads(directory)) return response.status(400).json({ data: null, error: { message: 'Caminho inválido.' } });
   if (!fs.existsSync(directory)) return response.json({ data: [], error: null });
+  if (!isSafeDirectory(directory)) return response.status(400).json({ data: null, error: { message: 'Diretório inválido.' } });
   const files = fs.readdirSync(directory, { withFileTypes: true }).filter((entry) => entry.isFile()).map((entry) => {
     const fullPath = path.join(directory, entry.name);
     const stats = fs.statSync(fullPath);
@@ -2900,6 +3075,7 @@ app.post('/api/storage/:bucket/upload', upload.single('file'), (request: Authent
     if (!relativePath || !canAccessStoragePath(request, bucket, relativePath)) return forbiddenStorage(response);
     const destination = path.resolve(uploadsRoot, bucket, relativePath);
     if (!isWithinUploads(destination)) return response.status(400).json({ data: null, error: { message: 'Caminho inválido.' } });
+    if (fs.existsSync(destination) && !isSafeRegularFile(destination)) return response.status(400).json({ data: null, error: { message: 'Destino de arquivo inválido.' } });
     if (fs.existsSync(destination) && request.body?.upsert !== 'true') return response.status(409).json({ data: null, error: { message: 'Arquivo já existe.' } });
     fs.mkdirSync(path.dirname(destination), { recursive: true });
     fs.writeFileSync(destination, request.file.buffer);
@@ -2914,7 +3090,7 @@ app.get('/api/storage/:bucket/download', (request, response) => {
   const relativePath = normalizeStoragePath(request.query.path);
   if (!relativePath || !canAccessStoragePath(request, bucket, relativePath)) return forbiddenStorage(response);
   const filePath = path.resolve(uploadsRoot, bucket, relativePath);
-  if (!isWithinUploads(filePath) || !fs.existsSync(filePath)) return response.status(404).send('Arquivo não encontrado.');
+  if (!isWithinUploads(filePath) || !isSafeRegularFile(filePath)) return response.status(404).send('Arquivo não encontrado.');
   return response.sendFile(filePath);
 });
 
@@ -2924,7 +3100,7 @@ app.delete('/api/storage/:bucket', (request, response) => {
   if (paths.some((relativePath) => !relativePath || !canAccessStoragePath(request, bucket, relativePath))) return forbiddenStorage(response);
   for (const relativePath of paths as string[]) {
     const filePath = path.resolve(uploadsRoot, bucket, relativePath);
-    if (isWithinUploads(filePath) && fs.existsSync(filePath)) fs.rmSync(filePath);
+    if (isWithinUploads(filePath) && isSafeRegularFile(filePath)) fs.rmSync(filePath);
   }
   return response.json({ data: null, error: null });
 });
@@ -2950,7 +3126,9 @@ if (process.env.NODE_ENV === 'production') {
 }
 
 app.use((error: unknown, _request: Request, response: Response, _next: NextFunction) => {
-  response.status(500).json({ data: null, error: errorPayload(error) });
+  const typedError = error as { code?: string; statusCode?: number };
+  const statusCode = typedError.code === 'LIMIT_FILE_SIZE' ? 413 : Number(typedError.statusCode || 400);
+  response.status(statusCode).json({ data: null, error: errorPayload(error) });
 });
 
 initDatabase().then(() => {

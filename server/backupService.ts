@@ -14,6 +14,7 @@ import {
   persistDatabase,
   selectRows,
 } from './db.js';
+import { authSecret } from './securityConfig.js';
 
 const execFileAsync = promisify(execFile);
 const projectRoot = path.resolve(path.dirname(getDatabasePath()), '..');
@@ -22,7 +23,6 @@ const backupRoot = getBackupDirectory();
 const settingsId = 'default';
 const backupFormatVersion = 1;
 const driveScope = 'https://www.googleapis.com/auth/drive.file';
-const localAuthSecret = process.env.LOCAL_AUTH_SECRET || 'otica-nordestina-local-development-secret';
 
 export type BackupSettings = {
   id: string;
@@ -107,8 +107,37 @@ async function walkFiles(root: string) {
   return result;
 }
 
+async function validateSafeTree(root: string) {
+  if (!fs.existsSync(root)) return;
+  const entries = await fsp.readdir(root, { withFileTypes: true });
+  for (const entry of entries) {
+    if (entry.isSymbolicLink() || entry.isBlockDevice() || entry.isCharacterDevice() || entry.isSocket()) {
+      throw new Error('O backup contém um tipo de arquivo não permitido.');
+    }
+    const fullPath = path.join(root, entry.name);
+    if (entry.isDirectory()) await validateSafeTree(fullPath);
+  }
+}
+
+async function validateArchiveMembers(archivePath: string) {
+  const { stdout: detailedListing } = await execFileAsync('tar', ['-tvzf', archivePath], { maxBuffer: 16 * 1024 * 1024 });
+  for (const line of detailedListing.split('\n').filter(Boolean)) {
+    if (!['-', 'd'].includes(line.charAt(0))) throw new Error('O backup contém link simbólico ou tipo de arquivo não permitido.');
+  }
+  const { stdout } = await execFileAsync('tar', ['-tzf', archivePath], { maxBuffer: 16 * 1024 * 1024 });
+  const members = stdout.split('\n').map((member) => member.trim()).filter(Boolean);
+  if (members.length > 100_000) throw new Error('O backup contém arquivos demais para ser processado.');
+  for (const member of members) {
+    const normalized = member.replaceAll('\\', '/');
+    if (normalized.startsWith('/') || normalized.split('/').some((part) => part === '..')) {
+      throw new Error('O backup contém um caminho inseguro.');
+    }
+  }
+  return members;
+}
+
 function encryptSecret(value: string) {
-  const key = createHash('sha256').update(localAuthSecret).digest();
+  const key = createHash('sha256').update(authSecret).digest();
   const iv = randomBytes(12);
   const cipher = createCipheriv('aes-256-gcm', key, iv);
   const encrypted = Buffer.concat([cipher.update(value, 'utf8'), cipher.final()]);
@@ -121,7 +150,7 @@ function decryptSecret(value: unknown) {
   try {
     const [version, ivText, tagText, encryptedText] = value.split(':');
     if (version !== 'v1' || !ivText || !tagText || !encryptedText) return null;
-    const key = createHash('sha256').update(localAuthSecret).digest();
+    const key = createHash('sha256').update(authSecret).digest();
     const decipher = createDecipheriv('aes-256-gcm', key, Buffer.from(ivText, 'base64'));
     decipher.setAuthTag(Buffer.from(tagText, 'base64'));
     return Buffer.concat([decipher.update(Buffer.from(encryptedText, 'base64')), decipher.final()]).toString('utf8');
@@ -281,7 +310,7 @@ export function getGoogleDriveConfigStatus(redirectUri?: string) {
 }
 
 function stateSignature(payload: string) {
-  return createHmac('sha256', localAuthSecret).update(payload).digest('hex');
+  return createHmac('sha256', authSecret).update(payload).digest('hex');
 }
 
 export function createGoogleOAuthUrl(redirectUri: string) {
@@ -493,12 +522,16 @@ export function listBackupEvents(jobId?: string, limit = 200) {
 }
 
 export async function inspectArchive(archivePath: string) {
-  if (!archivePath || !archivePath.startsWith(backupRoot) || !fs.existsSync(archivePath)) throw new Error('Arquivo de backup não encontrado.');
-  const { stdout } = await execFileAsync('tar', ['-xOf', archivePath, './manifest.json']);
+  const resolvedArchivePath = path.resolve(String(archivePath || ''));
+  const resolvedRoot = path.resolve(backupRoot);
+  if (!archivePath || !(resolvedArchivePath === resolvedRoot || resolvedArchivePath.startsWith(`${resolvedRoot}${path.sep}`)) || !fs.existsSync(resolvedArchivePath) || !fs.lstatSync(resolvedArchivePath).isFile()) throw new Error('Arquivo de backup não encontrado.');
+  await validateArchiveMembers(resolvedArchivePath);
+  const { stdout } = await execFileAsync('tar', ['-xOf', resolvedArchivePath, './manifest.json']);
   const manifest = JSON.parse(stdout) as BackupManifest;
   if (manifest.format_version !== backupFormatVersion || manifest.app !== 'Gestão Óticas H2K') throw new Error('Backup incompatível com esta aplicação.');
-  const stat = await fsp.stat(archivePath);
-  return { manifest, size_bytes: stat.size, sha256: await sha256File(archivePath), archive_name: path.basename(archivePath) };
+  if (manifest.database && manifest.database.path !== 'database/otica-nordestina.sqlite') throw new Error('O manifesto do backup possui um caminho de banco inválido.');
+  const stat = await fsp.stat(resolvedArchivePath);
+  return { manifest, size_bytes: stat.size, sha256: await sha256File(resolvedArchivePath), archive_name: path.basename(resolvedArchivePath) };
 }
 
 export async function importBackupArchive(archivePath: string, createdBy?: string | null) {
@@ -520,17 +553,24 @@ export async function restoreBackup(jobId: string, confirmation: string) {
   await fsp.rm(stage, { recursive: true, force: true });
   await fsp.mkdir(stage, { recursive: true });
   await execFileAsync('tar', ['-xzf', archivePath, '-C', stage]);
+  await validateSafeTree(stage);
   const restoredDb = path.join(stage, 'database', 'otica-nordestina.sqlite');
-  if (fs.existsSync(restoredDb)) await fsp.copyFile(restoredDb, getDatabasePath());
+  if (inspected.manifest.database) {
+    if (!fs.existsSync(restoredDb)) throw new Error('O banco informado no manifesto não foi encontrado no arquivo.');
+    const restoredStat = await fsp.stat(restoredDb);
+    if (restoredStat.size !== inspected.manifest.database.size_bytes || await sha256File(restoredDb) !== inspected.manifest.database.sha256) {
+      throw new Error('A integridade do banco restaurado não pôde ser confirmada.');
+    }
+    await fsp.copyFile(restoredDb, `${getDatabasePath()}.restore-${jobId}`);
+    await fsp.rename(`${getDatabasePath()}.restore-${jobId}`, getDatabasePath());
+  }
   const restoredUploads = path.join(stage, 'uploads');
   if (fs.existsSync(restoredUploads)) {
     await fsp.rm(uploadsRoot, { recursive: true, force: true });
     await fsp.cp(restoredUploads, uploadsRoot, { recursive: true });
   }
   await fsp.rm(stage, { recursive: true, force: true });
-  updateJob(jobId, { status: 'restored' });
-  addEvent(jobId, 'restored', 'Backup restaurado. O servidor será reiniciado para carregar o banco restaurado.', { pre_restore_job_id: preRestore.id });
-  persistDatabase();
+  await fsp.writeFile(path.join(backupRoot, 'restore-pending.json'), JSON.stringify({ job_id: jobId, pre_restore_job_id: preRestore.id, restored_at: now() }));
   setTimeout(() => process.exit(0), 750);
   return { job_id: jobId, pre_restore_job_id: preRestore.id, restart_scheduled: true };
 }
@@ -588,7 +628,9 @@ export function getBackupArchivePath(id: string) {
   const job = getBackupJob(id);
   if (!job?.local_path) return null;
   const localPath = String(job.local_path);
-  return localPath.startsWith(backupRoot) && fs.existsSync(localPath) ? localPath : null;
+  const resolved = path.resolve(localPath);
+  const root = path.resolve(backupRoot);
+  return (resolved === root || resolved.startsWith(`${root}${path.sep}`)) && fs.existsSync(resolved) && fs.lstatSync(resolved).isFile() ? resolved : null;
 }
 
 export function recordGoogleOAuthTokens(refreshToken: string, accountEmail?: string | null) {

@@ -40,7 +40,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // Check active sessions and subscribe to auth changes
     localApi.auth.getSession()
       .then(({ data: { session } }) => {
-        lastSessionRef.current = session?.access_token || null;
+        lastSessionRef.current = session?.session_id || session?.access_token || null;
         setSession(session);
         if (session?.user) {
           fetchUserProfile(session.user);
@@ -55,7 +55,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
 
     const { data: { subscription } } = localApi.auth.onAuthStateChange((_event, session) => {
       // Só atualiza se a sessão realmente mudou
-      const newSessionId = session?.access_token || null;
+      const newSessionId = session?.session_id || session?.access_token || null;
       if (newSessionId === lastSessionRef.current) {
         return; // Ignora se for a mesma sessão
       }
